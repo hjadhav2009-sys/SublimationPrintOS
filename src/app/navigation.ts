@@ -24,7 +24,7 @@ export const navigationItems: NavigationItem[] = [
   {
     routeId: "logs",
     label: "Logs",
-    description: "Runtime log shell"
+    description: "Local diagnostics"
   },
   {
     routeId: "updates",

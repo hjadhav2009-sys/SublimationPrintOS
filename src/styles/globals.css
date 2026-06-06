@@ -494,6 +494,64 @@ textarea {
   border-color: rgba(231, 183, 95, 0.38);
 }
 
+.logs-table {
+  display: grid;
+  gap: 8px;
+  overflow-x: auto;
+}
+
+.logs-row {
+  display: grid;
+  grid-template-columns:
+    minmax(190px, 1.1fr)
+    minmax(76px, 0.45fr)
+    minmax(96px, 0.55fr)
+    minmax(150px, 0.8fr)
+    minmax(230px, 1.4fr)
+    minmax(120px, 0.7fr);
+  gap: 10px;
+  align-items: center;
+  min-width: 920px;
+  min-height: 42px;
+  padding: 8px 10px;
+  color: var(--color-muted);
+  background: var(--color-surface-strong);
+  border: 1px solid var(--color-border-soft);
+  border-radius: var(--radius-control);
+}
+
+.logs-row span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.logs-row-header {
+  color: var(--color-subtle);
+  background: transparent;
+  border-color: transparent;
+  font-size: 0.78rem;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.report-file-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.report-file-list span {
+  display: inline-flex;
+  align-items: center;
+  min-height: 30px;
+  padding: 5px 9px;
+  color: var(--color-muted);
+  background: var(--color-surface-strong);
+  border: 1px solid var(--color-border-soft);
+  border-radius: var(--radius-control);
+  font-size: 0.82rem;
+}
+
 .field-row,
 .check-row,
 .shortcut-row {

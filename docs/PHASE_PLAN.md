@@ -4,9 +4,11 @@
 
 Foundation, AppData, SQLite, settings, health check, logs, crash recovery, and basic Real-ESRGAN test.
 
-Current baseline includes the desktop scaffold plus AppData folder creation, local `app.db` creation, foundation migrations, storage/database health checks, and SQLite-backed settings persistence.
+Current baseline includes the desktop scaffold plus AppData folder creation, local `app.db` creation, foundation migrations, storage/database health checks, SQLite-backed settings persistence, and the local logs/diagnostics foundation.
 
 Settings persistence is completed for Phase 0 defaults. Global application behavior, such as changing the entire app theme from saved settings, remains reserved for a later prompt.
+
+Logs and diagnostics foundation is completed with local JSONL log files, SQLite audit log integration, recent log viewing, and safe diagnostic report folder generation. Crash recovery is still reserved for a later prompt.
 
 ## Phase 1
 
