@@ -76,7 +76,8 @@ if (uniqueFiles.length > 0) {
 }
 
 if (bundleFiles.length > 0) {
-  console.log(`Bundle/installer-like files found: ${bundleFiles.length}`);
+  console.log(`Warning: bundle/installer-like files found: ${bundleFiles.length}`);
+  console.log("These are local build outputs. Do not commit, copy, upload, or publish them from this script.");
 } else {
   console.log("Warning: no Tauri bundle or installer artifact found yet.");
 }

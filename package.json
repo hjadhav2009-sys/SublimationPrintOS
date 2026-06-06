@@ -14,7 +14,8 @@
     "phase0:preflight": "node scripts/phase0-preflight.mjs",
     "phase0:check": "npm run phase0:preflight && npm run typecheck && npm run build",
     "phase0:package": "npm run phase0:check && npm run tauri:build",
-    "phase0:inspect": "node scripts/inspect-build-artifacts.mjs"
+    "phase0:inspect": "node scripts/inspect-build-artifacts.mjs",
+    "phase0:qa": "node scripts/phase0-qa.mjs"
   },
   "dependencies": {
     "@tauri-apps/api": "^2.0.0",
