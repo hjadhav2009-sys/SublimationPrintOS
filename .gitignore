@@ -11,12 +11,20 @@ src-tauri/target/
 src-tauri/gen/
 src-tauri/.cargo/
 .vite/
+release/artifacts/
 
 *.log
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 pnpm-debug.log*
+
+*.msi
+*.exe
+*.dmg
+*.AppImage
+*.deb
+*.rpm
 
 .DS_Store
 Thumbs.db

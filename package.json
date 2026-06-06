@@ -10,7 +10,11 @@
     "preview": "vite preview",
     "tauri:dev": "tauri dev",
     "tauri:build": "tauri build",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "phase0:preflight": "node scripts/phase0-preflight.mjs",
+    "phase0:check": "npm run phase0:preflight && npm run typecheck && npm run build",
+    "phase0:package": "npm run phase0:check && npm run tauri:build",
+    "phase0:inspect": "node scripts/inspect-build-artifacts.mjs"
   },
   "dependencies": {
     "@tauri-apps/api": "^2.0.0",

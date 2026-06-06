@@ -40,6 +40,9 @@ This repository contains the initial desktop app shell. It does not contain prod
 - Update manifest validation for `updates/downloaded/*/update-manifest.json`.
 - Update metadata staging that copies only manifest, optional README, and stage info.
 - Advanced health checks for local update folders and shell-only update safety.
+- Local packaging preflight for Phase 0 source and ignore-rule checks.
+- Build artifact inspection scripts for local Tauri outputs.
+- Alpha 0 checklist, release notes template, and packaging notes.
 - Basic Tauri commands:
   - `get_app_version`
   - `get_phase_info`
@@ -62,9 +65,12 @@ This repository contains the initial desktop app shell. It does not contain prod
 - Global OS-level shortcuts.
 - Full native close interception beyond Phase 0 best-effort shutdown marking.
 - Full installer.
+- Signed installer.
+- GitHub release publishing.
 - Online updater.
 - Auto-download of updates.
 - Update installation or apply flow.
+- Real release channel.
 - ZIP extraction for update packages.
 - App binary replacement.
 - Design Studio.
@@ -120,6 +126,10 @@ npm run build
 npm run preview
 npm run tauri:dev
 npm run tauri:build
+npm run phase0:preflight
+npm run phase0:check
+npm run phase0:package
+npm run phase0:inspect
 ```
 
 ## Build Commands
@@ -135,6 +145,19 @@ Desktop build:
 ```bash
 npm run tauri:build
 ```
+
+## Phase 0 Local Packaging
+
+Packaging checks are local-only and do not publish releases, sign installers, enable an online updater, or upload artifacts.
+
+```bash
+npm run phase0:preflight
+npm run phase0:check
+npm run phase0:package
+npm run phase0:inspect
+```
+
+`phase0:package` runs a local Tauri build when packaging dependencies are available. AppData is created at runtime and is not bundled. Do not commit installer files, `dist/`, `node_modules/`, `src-tauri/target/`, `app.db`, Real-ESRGAN binaries, or test images.
 
 ## Basic Coding Standards
 
@@ -162,6 +185,13 @@ npm run tauri:build
 |   `-- PHASE_PLAN.md
 |-- generated/
 |   `-- DOC_INDEX.md
+|-- release/
+|   |-- ALPHA0_BUILD_CHECKLIST.md
+|   |-- PACKAGING_NOTES.md
+|   `-- RELEASE_NOTES_TEMPLATE.md
+|-- scripts/
+|   |-- inspect-build-artifacts.mjs
+|   `-- phase0-preflight.mjs
 |-- src/
 |   |-- app/
 |   |-- components/
