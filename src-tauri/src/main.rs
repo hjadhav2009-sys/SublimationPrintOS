@@ -4,6 +4,7 @@ mod database;
 mod diagnostics;
 mod logging;
 mod migrations;
+mod recovery;
 mod settings;
 mod storage;
 
@@ -28,7 +29,14 @@ fn main() {
             commands::get_recent_logs,
             commands::get_diagnostics_summary,
             commands::create_diagnostic_report,
-            commands::clear_log_files
+            commands::clear_log_files,
+            commands::initialize_recovery,
+            commands::update_recovery_heartbeat,
+            commands::mark_recovery_clean_shutdown,
+            commands::get_recovery_status,
+            commands::create_recovery_snapshot,
+            commands::dismiss_previous_recovery_warning,
+            commands::clear_recovery_snapshots
         ])
         .run(tauri::generate_context!())
         .expect("error while running SublimationPrintOS");

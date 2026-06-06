@@ -6,6 +6,7 @@ import {
   initializeFoundation,
   runDatabaseHealthCheck
 } from "../app/foundationApi";
+import { getRecoveryStatus } from "../app/recoveryApi";
 import { Badge } from "../components/ui/Badge";
 import { Button } from "../components/ui/Button";
 import { Card } from "../components/ui/Card";
@@ -14,6 +15,7 @@ import type {
   DatabaseHealthCheckItem,
   DatabaseStatus,
   HealthCheckStatus,
+  RecoveryStatus,
   StorageStatus
 } from "../types/app";
 
@@ -31,6 +33,9 @@ export function HealthCheckPage() {
   );
   const [databaseHealth, setDatabaseHealth] =
     useState<DatabaseHealthCheck | null>(null);
+  const [recoveryStatus, setRecoveryStatus] = useState<RecoveryStatus | null>(
+    null
+  );
   const [isRunning, setIsRunning] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
@@ -39,14 +44,16 @@ export function HealthCheckPage() {
     setErrorMessage(null);
 
     try {
-      const [storage, database, health] = await Promise.all([
+      const [storage, database, health, recovery] = await Promise.all([
         getStorageStatus(),
         getDatabaseStatus(),
-        runDatabaseHealthCheck()
+        runDatabaseHealthCheck(),
+        getRecoveryStatus()
       ]);
       setStorageStatus(storage);
       setDatabaseStatus(database);
       setDatabaseHealth(health);
+      setRecoveryStatus(recovery);
     } catch (error: unknown) {
       setErrorMessage(commandErrorMessage(error));
     } finally {
@@ -63,16 +70,18 @@ export function HealthCheckPage() {
 
       try {
         await initializeFoundation();
-        const [storage, database, health] = await Promise.all([
+        const [storage, database, health, recovery] = await Promise.all([
           getStorageStatus(),
           getDatabaseStatus(),
-          runDatabaseHealthCheck()
+          runDatabaseHealthCheck(),
+          getRecoveryStatus()
         ]);
 
         if (isMounted) {
           setStorageStatus(storage);
           setDatabaseStatus(database);
           setDatabaseHealth(health);
+          setRecoveryStatus(recovery);
         }
       } catch (error: unknown) {
         if (isMounted) {
@@ -93,6 +102,7 @@ export function HealthCheckPage() {
   }, []);
 
   const foundationChecks = buildFoundationChecks(storageStatus, databaseStatus);
+  const recoveryChecks = buildRecoveryChecks(recoveryStatus);
 
   return (
     <section className="page">
@@ -163,6 +173,29 @@ export function HealthCheckPage() {
         </div>
       </Card>
 
+      <Card
+        title="Crash recovery checks"
+        status={
+          <Badge
+            variant={
+              recoveryStatus?.previous_unclean_session
+                ? "warning"
+                : recoveryStatus?.current_session
+                  ? "success"
+                  : "neutral"
+            }
+          >
+            {recoveryStatus?.message ?? "Not checked yet"}
+          </Badge>
+        }
+      >
+        <div className="check-list">
+          {recoveryChecks.map((check) => (
+            <CheckRow check={check} key={check.key} />
+          ))}
+        </div>
+      </Card>
+
       <Card title="Coming later" status={<Badge variant="warning">Placeholder</Badge>}>
         <div className="check-list">
           <CheckRow
@@ -185,6 +218,45 @@ export function HealthCheckPage() {
       </Card>
     </section>
   );
+}
+
+function buildRecoveryChecks(
+  recovery: RecoveryStatus | null
+): FoundationCheckRow[] {
+  return [
+    {
+      key: "recovery-directory-exists",
+      label: "Recovery directory exists",
+      status: recovery?.recovery_dir ? "pass" : "warn",
+      message: recovery?.recovery_dir ?? "Recovery status has not been loaded yet"
+    },
+    {
+      key: "current-session-exists",
+      label: "current-session.json exists",
+      status: recovery?.current_session ? "pass" : recovery ? "warn" : "warn",
+      message: recovery?.current_session
+        ? `Session ${recovery.current_session.session_id}`
+        : "Recovery session has not been initialized yet"
+    },
+    {
+      key: "recovery-snapshot-count",
+      label: "Snapshots count",
+      status: recovery ? "pass" : "warn",
+      message: recovery
+        ? `${recovery.snapshots.length} recovery snapshot(s) indexed`
+        : "Recovery status has not been loaded yet"
+    },
+    {
+      key: "previous-unclean-session",
+      label: "Previous unclean session",
+      status: recovery?.previous_unclean_session ? "warn" : recovery ? "pass" : "warn",
+      message: recovery?.previous_unclean_session
+        ? "Previous app session did not shut down cleanly"
+        : recovery
+          ? "No previous unclean session warning"
+          : "Recovery status has not been loaded yet"
+    }
+  ];
 }
 
 function buildFoundationChecks(

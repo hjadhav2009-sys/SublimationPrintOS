@@ -62,9 +62,9 @@ export const dashboardCards: DashboardCard[] = [
   {
     id: "crash-recovery",
     title: "Crash Recovery",
-    status: "Coming in later prompt",
-    summary: "Phase 0 placeholder for recovery planning.",
-    nextStep: "Add local crash markers and recovery flows later."
+    status: "Foundation added",
+    summary: "Local session markers, heartbeat, unclean shutdown detection, and safe recovery snapshots are available.",
+    nextStep: "Use this foundation for later Design Studio autosave and job recovery prompts."
   },
   {
     id: "installer",
