@@ -136,12 +136,8 @@ export function SettingsPage() {
     async function loadSettings() {
       setIsLoading(true);
       try {
-        const [storage, database, folders, loadedSettings] = await Promise.all([
-          getStorageStatus(),
-          getDatabaseStatus(),
-          getRequiredAppFolders(),
-          getAppSettings()
-        ]);
+        const { loadedSettings, storage, database, folders } =
+          await loadSettingsAndFoundationStatus();
 
         if (isMounted) {
           setStorageStatus(storage);
@@ -171,19 +167,28 @@ export function SettingsPage() {
     };
   }, []);
 
+  async function loadSettingsAndFoundationStatus() {
+    const loadedSettings = await getAppSettings();
+    const [storage, database, folders] = await Promise.all([
+      getStorageStatus(),
+      getDatabaseStatus(),
+      getRequiredAppFolders()
+    ]);
+
+    return { loadedSettings, storage, database, folders };
+  }
+
   async function handleReload() {
     setIsSaving(true);
     setMessage(null);
     setErrorMessage(null);
 
     try {
-      const [storage, database, loadedSettings] = await Promise.all([
-        getStorageStatus(),
-        getDatabaseStatus(),
-        getAppSettings()
-      ]);
+      const { loadedSettings, storage, database, folders } =
+        await loadSettingsAndFoundationStatus();
       setStorageStatus(storage);
       setDatabaseStatus(database);
+      setRequiredFolders(folders);
       setSettings(loadedSettings);
       setLastSavedSettings(loadedSettings);
       setValidation(null);
