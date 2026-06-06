@@ -186,3 +186,87 @@ export interface SettingsSummary {
   default_scale_factor: UpscaleDefaults["default_scale_factor"];
   updated_at_latest: string | null;
 }
+
+export type LogLevel = "debug" | "info" | "warn" | "error";
+
+export type LogModule =
+  | "app"
+  | "foundation"
+  | "database"
+  | "storage"
+  | "settings"
+  | "health"
+  | "diagnostics"
+  | "frontend";
+
+export type LogSource =
+  | "app.log"
+  | "errors.log"
+  | "database.log"
+  | "settings.log"
+  | "diagnostics.log"
+  | "audit_logs";
+
+export interface AppLogEntry {
+  timestamp: string;
+  level: LogLevel;
+  module: LogModule;
+  event: string;
+  message: string;
+  metadata: Record<string, unknown> | null;
+}
+
+export interface RecentLogEntry {
+  source: LogSource;
+  timestamp: string;
+  level: LogLevel;
+  module: LogModule;
+  event: string;
+  message: string;
+}
+
+export interface LogCommandResult {
+  ok: boolean;
+  message: string;
+}
+
+export interface RecentLogsResult {
+  ok: boolean;
+  entries: RecentLogEntry[];
+  message: string;
+}
+
+export interface DiagnosticLogFileStatus {
+  file_name: string;
+  exists: boolean;
+  size_bytes: number;
+  last_modified: string | null;
+}
+
+export interface DiagnosticsSummary {
+  ok: boolean;
+  app_data_dir: string;
+  database_path: string;
+  logs_dir: string;
+  diagnostics_dir: string;
+  log_files: DiagnosticLogFileStatus[];
+  schema_version: number | null;
+  settings_available: boolean;
+  recent_error_count: number;
+  message: string;
+}
+
+export interface DiagnosticReportResult {
+  ok: boolean;
+  report_dir: string;
+  files_written: string[];
+  message: string;
+}
+
+export interface FrontendLogEvent {
+  level: LogLevel;
+  module: LogModule;
+  event: string;
+  message: string;
+  metadata: Record<string, unknown> | null;
+}

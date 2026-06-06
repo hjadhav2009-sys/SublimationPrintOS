@@ -1,6 +1,8 @@
 mod app_paths;
 mod commands;
 mod database;
+mod diagnostics;
+mod logging;
 mod migrations;
 mod settings;
 mod storage;
@@ -20,7 +22,13 @@ fn main() {
             commands::save_app_settings,
             commands::reset_app_settings,
             commands::get_settings_summary,
-            commands::validate_app_settings
+            commands::validate_app_settings,
+            commands::initialize_logging,
+            commands::record_frontend_event,
+            commands::get_recent_logs,
+            commands::get_diagnostics_summary,
+            commands::create_diagnostic_report,
+            commands::clear_log_files
         ])
         .run(tauri::generate_context!())
         .expect("error while running SublimationPrintOS");

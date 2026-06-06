@@ -22,6 +22,10 @@ This repository contains the initial desktop app shell. It does not contain prod
 - Local settings persistence in the existing SQLite `settings_store` table.
 - Settings validation for company, app, production, upscale, and update defaults.
 - Settings save, reload, and reset UI for Phase 0 local preferences.
+- Local JSON Lines log files under AppData.
+- SQLite audit log integration for foundation diagnostics events.
+- Logs page viewer for recent local log and audit entries.
+- Safe diagnostic report folder generation under AppData diagnostics.
 - Basic Tauri commands:
   - `get_app_version`
   - `get_phase_info`
@@ -34,6 +38,9 @@ This repository contains the initial desktop app shell. It does not contain prod
 - Real-ESRGAN or image processing.
 - File upload or image intake.
 - Global theme application from the saved theme setting.
+- Crash recovery.
+- ZIP diagnostics export.
+- Open-folder actions for logs or diagnostic reports.
 - Design Studio.
 - Nesting.
 - Export print sheet workflows.

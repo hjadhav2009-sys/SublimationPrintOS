@@ -3,6 +3,14 @@ use crate::database::{
     get_database_status_for_paths, initialize_database, run_database_health_check_for_paths,
     DatabaseHealthCheck, DatabaseStatus,
 };
+use crate::diagnostics::{
+    create_diagnostic_report_for_paths, get_diagnostics_summary_for_paths,
+    DiagnosticReportResult, DiagnosticsSummary,
+};
+use crate::logging::{
+    clear_log_files_for_paths, get_recent_logs_for_paths, initialize_logging_for_paths,
+    record_frontend_event_for_paths, LogCommandResult, RecentLogsResult,
+};
 use crate::settings::{
     get_app_settings_for_paths, get_settings_summary_for_paths, reset_app_settings_for_paths,
     save_app_settings_for_paths, validate_app_settings_for_payload, AppSettings,
@@ -10,6 +18,7 @@ use crate::settings::{
 };
 use crate::storage::{ensure_storage, get_storage_status_for_paths, StorageStatus};
 use serde::Serialize;
+use serde_json::Value;
 use tauri::AppHandle;
 
 #[derive(Serialize)]
@@ -131,6 +140,51 @@ pub fn get_settings_summary(app: AppHandle) -> Result<SettingsSummary, String> {
 #[tauri::command]
 pub fn validate_app_settings(settings: AppSettings) -> SettingsValidationResult {
     validate_app_settings_for_payload(settings)
+}
+
+#[tauri::command]
+pub fn initialize_logging(app: AppHandle) -> Result<DiagnosticsSummary, String> {
+    let (paths, _storage_summary, _schema_version) = ensure_foundation_ready(&app)?;
+    initialize_logging_for_paths(&paths)?;
+    get_diagnostics_summary_for_paths(&paths)
+}
+
+#[tauri::command]
+pub fn record_frontend_event(
+    app: AppHandle,
+    level: String,
+    module: String,
+    event: String,
+    message: String,
+    metadata: Option<Value>,
+) -> Result<LogCommandResult, String> {
+    let (paths, _storage_summary, _schema_version) = ensure_foundation_ready(&app)?;
+    record_frontend_event_for_paths(&paths, level, module, event, message, metadata)
+}
+
+#[tauri::command]
+pub fn get_recent_logs(app: AppHandle, limit: i64) -> Result<RecentLogsResult, String> {
+    let (paths, _storage_summary, _schema_version) = ensure_foundation_ready(&app)?;
+    get_recent_logs_for_paths(&paths, limit)
+}
+
+#[tauri::command]
+pub fn get_diagnostics_summary(app: AppHandle) -> Result<DiagnosticsSummary, String> {
+    let (paths, _storage_summary, _schema_version) = ensure_foundation_ready(&app)?;
+    get_diagnostics_summary_for_paths(&paths)
+}
+
+#[tauri::command]
+pub fn create_diagnostic_report(app: AppHandle) -> Result<DiagnosticReportResult, String> {
+    let (paths, _storage_summary, _schema_version) = ensure_foundation_ready(&app)?;
+    create_diagnostic_report_for_paths(&paths)
+}
+
+#[tauri::command]
+pub fn clear_log_files(app: AppHandle, confirm: String) -> Result<DiagnosticsSummary, String> {
+    let (paths, _storage_summary, _schema_version) = ensure_foundation_ready(&app)?;
+    clear_log_files_for_paths(&paths, confirm)?;
+    get_diagnostics_summary_for_paths(&paths)
 }
 
 fn ensure_foundation_ready(
