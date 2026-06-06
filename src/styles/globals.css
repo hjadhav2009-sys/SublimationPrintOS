@@ -552,6 +552,43 @@ textarea {
   font-size: 0.82rem;
 }
 
+.package-list {
+  display: grid;
+  gap: 10px;
+}
+
+.package-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 12px;
+  align-items: start;
+  padding: 12px;
+  color: var(--color-muted);
+  background: var(--color-surface-strong);
+  border: 1px solid var(--color-border-soft);
+  border-radius: var(--radius-control);
+}
+
+.package-row-heading,
+.package-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+
+.package-row-heading {
+  margin-bottom: 8px;
+}
+
+.package-row-heading strong {
+  color: var(--color-text);
+}
+
+.package-meta {
+  font-size: 0.84rem;
+}
+
 .preview-box {
   max-height: 260px;
   margin: 0;
@@ -682,6 +719,7 @@ kbd {
   .field-row,
   .kv-row,
   .check-row,
+  .package-row,
   .shortcut-row {
     grid-template-columns: minmax(0, 1fr);
   }

@@ -8,7 +8,9 @@ mod logging;
 mod migrations;
 mod recovery;
 mod settings;
+mod shell_actions;
 mod storage;
+mod updates;
 
 use tauri::menu::{Menu, MenuItem, PredefinedMenuItem, Submenu};
 use tauri::{Emitter, Manager, WindowEvent};
@@ -129,7 +131,14 @@ fn main() {
             commands::get_realesrgan_expected_layout,
             commands::run_realesrgan_safe_test,
             commands::clear_realesrgan_test_output,
-            commands::run_advanced_health_check
+            commands::run_advanced_health_check,
+            commands::open_managed_folder,
+            commands::get_managed_folder_paths,
+            commands::get_offline_update_status,
+            commands::validate_offline_update_package,
+            commands::stage_offline_update_package,
+            commands::clear_staged_update,
+            commands::create_sample_update_manifest
         ])
         .run(tauri::generate_context!())
         .expect("error while running SublimationPrintOS");

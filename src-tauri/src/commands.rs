@@ -28,7 +28,17 @@ use crate::settings::{
     save_app_settings_for_paths, validate_app_settings_for_payload, AppSettings,
     SettingsSaveResult, SettingsSummary, SettingsValidationResult,
 };
+use crate::shell_actions::{
+    get_managed_folder_paths_for_paths, open_managed_folder_for_paths, ManagedFolderPaths,
+    OpenFolderResult,
+};
 use crate::storage::{ensure_storage, get_storage_status_for_paths, StorageStatus};
+use crate::updates::{
+    clear_staged_update_for_paths, create_sample_update_manifest_for_paths,
+    get_offline_update_status_for_paths, stage_offline_update_package_for_paths,
+    validate_offline_update_package_for_paths, OfflineUpdatePackage, OfflineUpdateStatus,
+    StageUpdateResult,
+};
 use serde::Serialize;
 use serde_json::Value;
 use tauri::AppHandle;
@@ -282,6 +292,57 @@ pub fn clear_realesrgan_test_output(app: AppHandle) -> Result<EngineDiscoverySta
 pub fn run_advanced_health_check(app: AppHandle) -> Result<AdvancedHealthReport, String> {
     let (paths, _storage_summary, _schema_version) = ensure_foundation_ready(&app)?;
     run_advanced_health_check_for_paths(&paths)
+}
+
+#[tauri::command]
+pub fn open_managed_folder(app: AppHandle, key: String) -> Result<OpenFolderResult, String> {
+    let (paths, _storage_summary, _schema_version) = ensure_foundation_ready(&app)?;
+    open_managed_folder_for_paths(&paths, key)
+}
+
+#[tauri::command]
+pub fn get_managed_folder_paths(app: AppHandle) -> Result<ManagedFolderPaths, String> {
+    let (paths, _storage_summary, _schema_version) = ensure_foundation_ready(&app)?;
+    get_managed_folder_paths_for_paths(&paths)
+}
+
+#[tauri::command]
+pub fn get_offline_update_status(app: AppHandle) -> Result<OfflineUpdateStatus, String> {
+    let (paths, _storage_summary, _schema_version) = ensure_foundation_ready(&app)?;
+    get_offline_update_status_for_paths(&paths)
+}
+
+#[tauri::command]
+pub fn validate_offline_update_package(
+    app: AppHandle,
+    folder_name: String,
+) -> Result<OfflineUpdatePackage, String> {
+    let (paths, _storage_summary, _schema_version) = ensure_foundation_ready(&app)?;
+    validate_offline_update_package_for_paths(&paths, folder_name)
+}
+
+#[tauri::command]
+pub fn stage_offline_update_package(
+    app: AppHandle,
+    folder_name: String,
+) -> Result<StageUpdateResult, String> {
+    let (paths, _storage_summary, _schema_version) = ensure_foundation_ready(&app)?;
+    stage_offline_update_package_for_paths(&paths, folder_name)
+}
+
+#[tauri::command]
+pub fn clear_staged_update(
+    app: AppHandle,
+    confirm: String,
+) -> Result<OfflineUpdateStatus, String> {
+    let (paths, _storage_summary, _schema_version) = ensure_foundation_ready(&app)?;
+    clear_staged_update_for_paths(&paths, confirm)
+}
+
+#[tauri::command]
+pub fn create_sample_update_manifest(app: AppHandle) -> Result<OfflineUpdateStatus, String> {
+    let (paths, _storage_summary, _schema_version) = ensure_foundation_ready(&app)?;
+    create_sample_update_manifest_for_paths(&paths)
 }
 
 fn ensure_foundation_ready(

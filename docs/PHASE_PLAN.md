@@ -2,7 +2,7 @@
 
 ## Phase 0
 
-Foundation, AppData, SQLite, settings, health check, logs, crash recovery, and basic Real-ESRGAN test.
+Foundation, AppData, SQLite, settings, health check, logs, crash recovery, managed folder actions, offline update shell, and basic Real-ESRGAN test.
 
 Current baseline includes the desktop scaffold plus AppData folder creation, local `app.db` creation, foundation migrations, storage/database health checks, SQLite-backed settings persistence, local logs/diagnostics foundation, crash recovery foundation, Real-ESRGAN discovery/test-run foundation, advanced health checks, keyboard shortcuts, and native menu/close handling foundation.
 
@@ -14,7 +14,7 @@ Crash recovery foundation is completed with local session markers, heartbeat tra
 
 Real-ESRGAN foundation is completed for local binary discovery, expected layout reporting, and fixed safe test-run only. Full Upscale Factory, image intake, and production image processing remain reserved for later prompts.
 
-Advanced health checks, app-window shortcuts, native menu actions, and best-effort close handling are completed as Phase 0 foundations. System tray, global OS shortcuts, and installer polish remain later work.
+Advanced health checks, app-window shortcuts, native menu actions, best-effort close handling, controlled open-folder actions, and the offline update metadata shell are completed as Phase 0 foundations. System tray, global OS shortcuts, online update checks, update installation, and installer polish remain later work.
 
 ## Phase 1
 

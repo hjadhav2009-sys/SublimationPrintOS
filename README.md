@@ -4,7 +4,7 @@ SublimationPrintOS is an offline Windows desktop production operating system for
 
 ## Current Phase
 
-Phase 0: Foundation scaffold with local storage, SQLite, settings persistence, logs, diagnostics, and crash recovery markers.
+Phase 0: Foundation scaffold with local storage, SQLite, settings persistence, logs, diagnostics, crash recovery markers, controlled folder actions, and an offline update shell.
 
 This repository contains the initial desktop app shell. It does not contain production workflow features yet.
 
@@ -32,9 +32,14 @@ This repository contains the initial desktop app shell. It does not contain prod
 - Safe recovery snapshot files under AppData recovery jobs.
 - Real-ESRGAN ncnn Vulkan local discovery and expected layout checks.
 - Fixed safe Real-ESRGAN test-run foundation using only AppData engine paths.
-- Advanced health report covering system, storage, database, settings, logs, diagnostics, recovery, engine, and security checks.
+- Advanced health report covering system, storage, database, settings, logs, diagnostics, recovery, updates, engine, and security checks.
 - App-window keyboard shortcut framework.
 - Native app menu foundation and best-effort close/shutdown handling.
+- Managed folder opening for allowlisted AppData folders only.
+- Offline update shell for local folder-based update package inspection.
+- Update manifest validation for `updates/downloaded/*/update-manifest.json`.
+- Update metadata staging that copies only manifest, optional README, and stage info.
+- Advanced health checks for local update folders and shell-only update safety.
 - Basic Tauri commands:
   - `get_app_version`
   - `get_phase_info`
@@ -53,11 +58,15 @@ This repository contains the initial desktop app shell. It does not contain prod
 - Binary asset recovery.
 - Guaranteed close interception beyond Phase 0 best-effort frontend shutdown marking.
 - ZIP diagnostics export.
-- Open-folder actions for logs or diagnostic reports.
 - System tray.
 - Global OS-level shortcuts.
 - Full native close interception beyond Phase 0 best-effort shutdown marking.
 - Full installer.
+- Online updater.
+- Auto-download of updates.
+- Update installation or apply flow.
+- ZIP extraction for update packages.
+- App binary replacement.
 - Design Studio.
 - Nesting.
 - Export print sheet workflows.
@@ -170,4 +179,4 @@ npm run tauri:build
 
 ## Next Development Step
 
-Recommended next task: add the basic Real-ESRGAN discovery/test foundation without building upload or production workflows.
+Recommended next task: plan the Phase 0 installer/release packaging boundary without adding automatic update installation.

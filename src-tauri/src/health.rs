@@ -6,6 +6,7 @@ use crate::logging::{logs_dir, new_log_entry, write_audit_log_event, write_log_e
 use crate::recovery::get_recovery_status_for_paths;
 use crate::settings::get_app_settings_for_paths;
 use crate::storage::get_storage_status_for_paths;
+use crate::updates::{get_offline_update_status_for_paths, update_dirs};
 use chrono::Utc;
 use serde::Serialize;
 
@@ -45,6 +46,8 @@ pub fn run_advanced_health_check_for_paths(paths: &AppPaths) -> Result<AdvancedH
     let recovery_result = get_recovery_status_for_paths(paths);
     let engine_result = discover_realesrgan_engine_for_paths_internal(paths);
     let engine_paths = engine_paths(paths);
+    let update_dirs = update_dirs(paths);
+    let update_status_result = get_offline_update_status_for_paths(paths);
     let mut checks = Vec::new();
 
     checks.push(check(
@@ -269,6 +272,57 @@ pub fn run_advanced_health_check_for_paths(paths: &AppPaths) -> Result<AdvancedH
         "Snapshots folder exists",
         "recovery",
         &paths.app_data_dir.join("jobs").join("recovery").join("snapshots"),
+    ));
+
+    checks.push(path_check(
+        "updates-root-exists",
+        "Updates root exists",
+        "updates",
+        &update_dirs.updates_dir,
+    ));
+    checks.push(path_check(
+        "updates-downloaded-folder-exists",
+        "Downloaded updates folder exists",
+        "updates",
+        &update_dirs.downloaded_dir,
+    ));
+    checks.push(path_check(
+        "updates-staged-folder-exists",
+        "Staged updates folder exists",
+        "updates",
+        &update_dirs.staged_dir,
+    ));
+    checks.push(path_check(
+        "updates-rollback-folder-exists",
+        "Rollback updates folder exists",
+        "updates",
+        &update_dirs.rollback_dir,
+    ));
+    match &update_status_result {
+        Ok(status) => checks.push(check(
+            "offline-update-status-available",
+            "Offline update status available",
+            "updates",
+            if status.ok { "pass" } else { "warn" },
+            &status.message,
+            Some(format!("{} package(s) found", status.packages.len())),
+        )),
+        Err(error) => checks.push(check(
+            "offline-update-status-available",
+            "Offline update status available",
+            "updates",
+            "warn",
+            "Offline update status could not be loaded",
+            Some(error.clone()),
+        )),
+    }
+    checks.push(check(
+        "offline-update-shell-only",
+        "Staged update shell only",
+        "updates",
+        "pass",
+        "Phase 0 can inspect and stage metadata only; update installation is disabled",
+        None,
     ));
 
     match &engine_result {
