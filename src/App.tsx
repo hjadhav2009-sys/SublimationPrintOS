@@ -31,6 +31,12 @@ const pageComponents: Record<RouteId, () => JSX.Element> = {
   shortcuts: ShortcutsPage
 };
 
+type PendingPageAction =
+  | "run-health-check"
+  | "discover-engine"
+  | "refresh-recovery-status"
+  | null;
+
 let recoveryActiveRoute: RouteId = DEFAULT_ROUTE;
 let recoveryLifecycleStarted = false;
 let recoveryHeartbeatId: number | null = null;
@@ -46,6 +52,8 @@ export default function App() {
   const [currentRoute, setCurrentRoute] = useState<RouteId>(() =>
     getRouteFromHash(window.location.hash)
   );
+  const [pendingPageAction, setPendingPageAction] =
+    useState<PendingPageAction>(null);
 
   function navigateToRoute(routeId: RouteId) {
     const nextPath = routes[routeId].path;
@@ -76,6 +84,32 @@ export default function App() {
       });
     }
   }, [currentRoute]);
+
+  useEffect(() => {
+    if (!pendingPageAction) {
+      return;
+    }
+
+    if (pendingPageAction === "run-health-check" && currentRoute === "health") {
+      window.dispatchEvent(new CustomEvent("spos:run-health-check"));
+      setPendingPageAction(null);
+      return;
+    }
+
+    if (pendingPageAction === "discover-engine" && currentRoute === "upscale") {
+      window.dispatchEvent(new CustomEvent("spos:discover-engine"));
+      setPendingPageAction(null);
+      return;
+    }
+
+    if (
+      pendingPageAction === "refresh-recovery-status" &&
+      currentRoute === "dashboard"
+    ) {
+      window.dispatchEvent(new CustomEvent("spos:refresh-recovery-status"));
+      setPendingPageAction(null);
+    }
+  }, [pendingPageAction, currentRoute]);
 
   useEffect(() => {
     if (!recoveryLifecycleStarted) {
@@ -151,8 +185,8 @@ export default function App() {
       }
 
       if (shortcut.action === "refresh_health_check") {
+        setPendingPageAction("run-health-check");
         navigateToRoute("health");
-        window.dispatchEvent(new CustomEvent("spos:run-health-check"));
       }
     };
 
@@ -190,18 +224,20 @@ export default function App() {
     }
 
     if (action === "discover_engine") {
+      setPendingPageAction("discover-engine");
       navigateToRoute("upscale");
-      window.setTimeout(() => {
-        window.dispatchEvent(new CustomEvent("spos:discover-engine"));
-      }, 0);
       return;
     }
 
     if (action === "run_advanced_health") {
+      setPendingPageAction("run-health-check");
       navigateToRoute("health");
-      window.setTimeout(() => {
-        window.dispatchEvent(new CustomEvent("spos:run-health-check"));
-      }, 0);
+      return;
+    }
+
+    if (action === "recovery_snapshot_created") {
+      setPendingPageAction("refresh-recovery-status");
+      navigateToRoute("dashboard");
       return;
     }
 
