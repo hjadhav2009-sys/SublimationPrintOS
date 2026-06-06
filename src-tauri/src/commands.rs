@@ -1,4 +1,11 @@
+use crate::app_paths::{path_to_string, required_folder_descriptors, resolve_app_paths};
+use crate::database::{
+    get_database_status_for_paths, initialize_database, run_database_health_check_for_paths,
+    DatabaseHealthCheck, DatabaseStatus,
+};
+use crate::storage::{ensure_storage, get_storage_status_for_paths, StorageStatus};
 use serde::Serialize;
+use tauri::AppHandle;
 
 #[derive(Serialize)]
 pub struct PhaseInfo {
@@ -6,6 +13,20 @@ pub struct PhaseInfo {
     name: String,
     status: String,
     local_first: bool,
+}
+
+#[derive(Serialize)]
+pub struct FoundationStatus {
+    ok: bool,
+    app_data_dir: String,
+    database_path: String,
+    folders_created: usize,
+    folders_existing: usize,
+    folders_missing: usize,
+    schema_version: i64,
+    storage_ok: bool,
+    database_ok: bool,
+    message: String,
 }
 
 #[tauri::command]
@@ -26,4 +47,53 @@ pub fn get_phase_info() -> PhaseInfo {
 #[tauri::command]
 pub fn ping_backend() -> String {
     "pong".to_string()
+}
+
+#[tauri::command]
+pub fn initialize_foundation(app: AppHandle) -> Result<FoundationStatus, String> {
+    let paths = resolve_app_paths(&app)?;
+    let storage_summary = ensure_storage(&paths)?;
+    let schema_version = initialize_database(&paths)?;
+    let database_status = get_database_status_for_paths(&paths);
+    let ok = storage_summary.status.ok && database_status.ok;
+
+    Ok(FoundationStatus {
+        ok,
+        app_data_dir: path_to_string(&paths.app_data_dir),
+        database_path: path_to_string(&paths.database_path),
+        folders_created: storage_summary.folders_created,
+        folders_existing: storage_summary.folders_existing,
+        folders_missing: storage_summary.status.missing_folders_count,
+        schema_version,
+        storage_ok: storage_summary.status.ok,
+        database_ok: database_status.ok,
+        message: if ok {
+            "Foundation initialized".to_string()
+        } else {
+            "Foundation initialized with warnings".to_string()
+        },
+    })
+}
+
+#[tauri::command]
+pub fn get_storage_status(app: AppHandle) -> Result<StorageStatus, String> {
+    let paths = resolve_app_paths(&app)?;
+    Ok(get_storage_status_for_paths(&paths))
+}
+
+#[tauri::command]
+pub fn get_database_status(app: AppHandle) -> Result<DatabaseStatus, String> {
+    let paths = resolve_app_paths(&app)?;
+    Ok(get_database_status_for_paths(&paths))
+}
+
+#[tauri::command]
+pub fn run_database_health_check(app: AppHandle) -> Result<DatabaseHealthCheck, String> {
+    let paths = resolve_app_paths(&app)?;
+    Ok(run_database_health_check_for_paths(&paths))
+}
+
+#[tauri::command]
+pub fn get_required_app_folders() -> Vec<crate::app_paths::AppFolderDescriptor> {
+    required_folder_descriptors()
 }

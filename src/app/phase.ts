@@ -11,38 +11,38 @@ export const phaseInfo: PhaseInfo = {
   name: "Foundation",
   mode: "Offline Mode",
   storage: "Local",
-  database: "Not configured yet",
+  database: "SQLite foundation",
   aiEngine: "Not configured yet",
-  status: "Scaffold only"
+  status: "Foundation active"
 };
 
 export const dashboardCards: DashboardCard[] = [
   {
     id: "foundation-status",
     title: "Foundation Status",
-    status: "Scaffold only",
-    summary: "React, TypeScript, Vite, and Tauri foundation files are prepared.",
+    status: "Active foundation",
+    summary: "React, TypeScript, Vite, Tauri, AppData, and SQLite foundation files are prepared.",
     nextStep: "Keep this as the base for later local-first production features."
   },
   {
     id: "appdata-storage",
     title: "AppData Storage",
-    status: "Coming in next prompt",
-    summary: "Phase 0 placeholder for local AppData storage paths.",
-    nextStep: "Add Windows AppData folder setup and permission checks later."
+    status: "Foundation added",
+    summary: "Local AppData folder creation is handled by the Tauri backend.",
+    nextStep: "Use this storage root for later Phase 0 settings, logs, and assets."
   },
   {
     id: "sqlite-database",
     title: "SQLite Database",
-    status: "Coming in next prompt",
-    summary: "Phase 0 placeholder for local SQLite persistence.",
-    nextStep: "Add schema and migrations in a later Phase 0 task."
+    status: "Foundation added",
+    summary: "Local app.db creation and foundation migrations are handled by the backend.",
+    nextStep: "Add feature-specific tables only in later scoped prompts."
   },
   {
     id: "settings-system",
     title: "Settings System",
     status: "Coming in next prompt",
-    summary: "Phase 0 placeholder for editable settings.",
+    summary: "The settings table exists, but the settings UI is still read-only placeholder data.",
     nextStep: "Persist typed settings locally after storage exists."
   },
   {
@@ -55,9 +55,9 @@ export const dashboardCards: DashboardCard[] = [
   {
     id: "health-check",
     title: "Health Check",
-    status: "Coming in later prompt",
-    summary: "Phase 0 placeholder for diagnostic check definitions.",
-    nextStep: "Replace static placeholder rows with real local checks later."
+    status: "Foundation checks added",
+    summary: "AppData and SQLite health checks are available for Phase 0 foundation validation.",
+    nextStep: "Add GPU and Real-ESRGAN diagnostics in a later task."
   },
   {
     id: "crash-recovery",
@@ -122,7 +122,7 @@ export const healthCheckItems: HealthCheckItem[] = [
   {
     id: "sqlite-status",
     label: "SQLite status",
-    status: "Not configured yet"
+    status: "Foundation check available"
   },
   {
     id: "gpu-vulkan-status",

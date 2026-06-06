@@ -15,6 +15,10 @@ This repository contains the initial desktop app shell. It does not contain prod
 - Dashboard-first layout with sidebar navigation.
 - Phase 0 placeholder pages for Dashboard, Settings, Health Check, Upscale Test, Logs, Updates, and Shortcuts.
 - Typed placeholder data for dashboard cards, settings sections, health checks, and shortcuts.
+- AppData folder initialization using the OS data directory.
+- SQLite database creation at the local AppData root.
+- Foundation schema migrations for metadata, audit logs, settings, file asset records, and background job records.
+- Foundation health checks for local storage and SQLite status.
 - Basic Tauri commands:
   - `get_app_version`
   - `get_phase_info`
@@ -24,8 +28,6 @@ This repository contains the initial desktop app shell. It does not contain prod
 
 ## Intentionally Not Implemented Yet
 
-- SQLite database and migrations.
-- AppData storage setup.
 - Real-ESRGAN or image processing.
 - File upload or image intake.
 - Design Studio.
@@ -140,4 +142,4 @@ npm run tauri:build
 
 ## Next Development Step
 
-Recommended next task: add the AppData + SQLite foundation for Phase 0 without building production workflow features.
+Recommended next task: add the Phase 0 settings persistence layer and settings health checks without building production workflow features.

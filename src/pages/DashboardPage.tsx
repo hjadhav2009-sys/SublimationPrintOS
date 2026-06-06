@@ -1,13 +1,24 @@
 import { invoke } from "@tauri-apps/api/core";
 import { useEffect, useState } from "react";
-import { dashboardCards, phaseInfo } from "../app/phase";
+import {
+  commandErrorMessage,
+  initializeFoundation
+} from "../app/foundationApi";
+import { dashboardCards } from "../app/phase";
 import { Badge } from "../components/ui/Badge";
 import { Card } from "../components/ui/Card";
+import type { FoundationStatus } from "../types/app";
 
 type BackendStatus = "checking" | "connected" | "not-connected";
+type FoundationRunState = "initializing" | "ready" | "warning" | "error";
 
 export function DashboardPage() {
   const [backendStatus, setBackendStatus] = useState<BackendStatus>("checking");
+  const [foundationStatus, setFoundationStatus] =
+    useState<FoundationStatus | null>(null);
+  const [foundationState, setFoundationState] =
+    useState<FoundationRunState>("initializing");
+  const [foundationError, setFoundationError] = useState<string | null>(null);
 
   useEffect(() => {
     let isMounted = true;
@@ -21,6 +32,22 @@ export function DashboardPage() {
       .catch(() => {
         if (isMounted) {
           setBackendStatus("not-connected");
+        }
+      });
+
+    initializeFoundation()
+      .then((status) => {
+        if (isMounted) {
+          setFoundationStatus(status);
+          setFoundationState(status.ok ? "ready" : "warning");
+          setFoundationError(null);
+        }
+      })
+      .catch((error: unknown) => {
+        if (isMounted) {
+          setFoundationStatus(null);
+          setFoundationState("error");
+          setFoundationError(commandErrorMessage(error));
         }
       });
 
@@ -60,9 +87,87 @@ export function DashboardPage() {
           >
             {backendLabel}
           </Badge>
-          <Badge variant="neutral">{phaseInfo.status}</Badge>
+          <Badge
+            variant={
+              foundationState === "ready"
+                ? "success"
+                : foundationState === "initializing"
+                  ? "info"
+                  : "warning"
+            }
+          >
+            Foundation: {foundationState}
+          </Badge>
         </div>
       </div>
+
+      <Card
+        eyebrow="Local-first foundation"
+        status={
+          <Badge
+            variant={
+              foundationState === "ready"
+                ? "success"
+                : foundationState === "initializing"
+                  ? "info"
+                  : "warning"
+            }
+          >
+            {foundationStatus?.message ?? "Initializing foundation"}
+          </Badge>
+        }
+        title="AppData and SQLite status"
+      >
+        {foundationStatus ? (
+          <>
+            <div className="summary-grid">
+              <div className="summary-item">
+                <span>Storage</span>
+                <strong>{foundationStatus.storage_ok ? "Ready" : "Warning"}</strong>
+              </div>
+              <div className="summary-item">
+                <span>Database</span>
+                <strong>
+                  {foundationStatus.database_ok ? "Ready" : "Warning"}
+                </strong>
+              </div>
+              <div className="summary-item">
+                <span>Schema version</span>
+                <strong>{foundationStatus.schema_version}</strong>
+              </div>
+              <div className="summary-item">
+                <span>Folders</span>
+                <strong>
+                  {foundationStatus.folders_created} created /{" "}
+                  {foundationStatus.folders_existing} existing
+                </strong>
+              </div>
+            </div>
+            <div className="kv-list">
+              <div className="kv-row">
+                <span>AppData path</span>
+                <span className="path-value">{foundationStatus.app_data_dir}</span>
+              </div>
+              <div className="kv-row">
+                <span>Database path</span>
+                <span className="path-value">
+                  {foundationStatus.database_path}
+                </span>
+              </div>
+              <div className="kv-row">
+                <span>Missing folders</span>
+                <span>{foundationStatus.folders_missing}</span>
+              </div>
+            </div>
+          </>
+        ) : (
+          <p>
+            {foundationState === "initializing"
+              ? "Creating AppData folders and preparing app.db."
+              : `Foundation initialization failed: ${foundationError ?? "Unknown error"}`}
+          </p>
+        )}
+      </Card>
 
       <div className="card-grid">
         {dashboardCards.map((card) => (
