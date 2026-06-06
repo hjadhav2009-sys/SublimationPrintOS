@@ -200,6 +200,12 @@ textarea {
   justify-content: flex-end;
 }
 
+.settings-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
 .align-left {
   justify-content: flex-start;
 }
@@ -390,6 +396,102 @@ textarea {
 .shortcut-list {
   display: grid;
   gap: 10px;
+}
+
+.settings-form-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+  gap: 14px;
+  align-items: start;
+}
+
+.settings-field,
+.settings-checkbox {
+  display: grid;
+  gap: 7px;
+  min-width: 0;
+}
+
+.settings-field > span,
+.settings-checkbox span {
+  color: var(--color-muted);
+  font-size: 0.82rem;
+  font-weight: 700;
+}
+
+.settings-field input,
+.settings-field select {
+  width: 100%;
+  min-height: 40px;
+  padding: 8px 10px;
+  color: var(--color-text);
+  background: var(--color-surface-strong);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-control);
+}
+
+.settings-field input:focus,
+.settings-field select:focus {
+  outline: 2px solid var(--color-info);
+  outline-offset: 2px;
+}
+
+.settings-field small {
+  color: #ffe1a3;
+  line-height: 1.4;
+}
+
+.number-input {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: center;
+}
+
+.number-input > span,
+.field-note {
+  color: var(--color-subtle);
+  font-size: 0.82rem;
+}
+
+.field-note {
+  margin: 0;
+  line-height: 1.45;
+}
+
+.settings-checkbox {
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  min-height: 40px;
+  padding: 9px 10px;
+  background: var(--color-surface-strong);
+  border: 1px solid var(--color-border-soft);
+  border-radius: var(--radius-control);
+}
+
+.settings-checkbox input {
+  width: 16px;
+  height: 16px;
+  accent-color: var(--color-accent);
+}
+
+.notice {
+  min-height: 40px;
+  padding: 10px 12px;
+  color: var(--color-muted);
+  background: var(--color-surface);
+  border: 1px solid var(--color-border-soft);
+  border-radius: var(--radius-control);
+}
+
+.notice-success {
+  color: #b8f4df;
+  border-color: rgba(79, 209, 165, 0.42);
+}
+
+.notice-warning {
+  color: #ffe1a3;
+  border-color: rgba(231, 183, 95, 0.38);
 }
 
 .field-row,

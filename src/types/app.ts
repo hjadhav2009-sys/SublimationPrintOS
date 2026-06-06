@@ -115,3 +115,74 @@ export interface DatabaseHealthCheck {
   checks: DatabaseHealthCheckItem[];
   message: string;
 }
+
+export interface CompanySettings {
+  company_name: string;
+  operator_name: string;
+  default_workspace_name: string;
+}
+
+export interface AppPreferences {
+  theme: "dark" | "light";
+  language: "en" | "hi" | "mr";
+  startup_page: RouteId;
+  autosave_interval_minutes: number;
+  recent_files_limit: number;
+}
+
+export interface ProductionDefaults {
+  default_unit: "mm" | "inch" | "px";
+  default_dpi: 300 | 600;
+  default_page_preset: "A4" | "A3" | "13x19" | "custom";
+  default_margin_mm: number;
+  default_gap_mm: number;
+  default_bleed_mm: number;
+}
+
+export interface UpscaleDefaults {
+  default_scale_factor: 2 | 4 | 8;
+  default_output_format: "png" | "jpg" | "tiff" | "webp";
+  preserve_transparency: boolean;
+  use_gpu_when_available: boolean;
+}
+
+export interface UpdatePreferences {
+  check_updates_on_startup: boolean;
+  allow_offline_update_package: boolean;
+}
+
+export interface AppSettings {
+  company: CompanySettings;
+  app: AppPreferences;
+  production: ProductionDefaults;
+  upscale: UpscaleDefaults;
+  updates: UpdatePreferences;
+  updated_at: string | null;
+}
+
+export interface SettingsSaveResult {
+  ok: boolean;
+  settings: AppSettings;
+  message: string;
+}
+
+export interface SettingsValidationError {
+  field: string;
+  message: string;
+}
+
+export interface SettingsValidationResult {
+  ok: boolean;
+  errors: SettingsValidationError[];
+  message: string;
+}
+
+export interface SettingsSummary {
+  company_name: string;
+  theme: AppPreferences["theme"];
+  language: AppPreferences["language"];
+  default_unit: ProductionDefaults["default_unit"];
+  default_dpi: ProductionDefaults["default_dpi"];
+  default_scale_factor: UpscaleDefaults["default_scale_factor"];
+  updated_at_latest: string | null;
+}
