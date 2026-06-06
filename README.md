@@ -4,7 +4,7 @@ SublimationPrintOS is an offline Windows desktop production operating system for
 
 ## Current Phase
 
-Phase 0: Foundation scaffold.
+Phase 0: Foundation scaffold with local storage, SQLite, and settings persistence.
 
 This repository contains the initial desktop app shell. It does not contain production workflow features yet.
 
@@ -19,6 +19,9 @@ This repository contains the initial desktop app shell. It does not contain prod
 - SQLite database creation at the local AppData root.
 - Foundation schema migrations for metadata, audit logs, settings, file asset records, and background job records.
 - Foundation health checks for local storage and SQLite status.
+- Local settings persistence in the existing SQLite `settings_store` table.
+- Settings validation for company, app, production, upscale, and update defaults.
+- Settings save, reload, and reset UI for Phase 0 local preferences.
 - Basic Tauri commands:
   - `get_app_version`
   - `get_phase_info`
@@ -30,6 +33,7 @@ This repository contains the initial desktop app shell. It does not contain prod
 
 - Real-ESRGAN or image processing.
 - File upload or image intake.
+- Global theme application from the saved theme setting.
 - Design Studio.
 - Nesting.
 - Export print sheet workflows.
@@ -142,4 +146,4 @@ npm run tauri:build
 
 ## Next Development Step
 
-Recommended next task: add the Phase 0 settings persistence layer and settings health checks without building production workflow features.
+Recommended next task: expand Phase 0 health checks, logs, or crash recovery without building production workflow features.

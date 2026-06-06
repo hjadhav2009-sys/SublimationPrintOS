@@ -3,6 +3,11 @@ use crate::database::{
     get_database_status_for_paths, initialize_database, run_database_health_check_for_paths,
     DatabaseHealthCheck, DatabaseStatus,
 };
+use crate::settings::{
+    get_app_settings_for_paths, get_settings_summary_for_paths, reset_app_settings_for_paths,
+    save_app_settings_for_paths, validate_app_settings_for_payload, AppSettings,
+    SettingsSaveResult, SettingsSummary, SettingsValidationResult,
+};
 use crate::storage::{ensure_storage, get_storage_status_for_paths, StorageStatus};
 use serde::Serialize;
 use tauri::AppHandle;
@@ -51,9 +56,7 @@ pub fn ping_backend() -> String {
 
 #[tauri::command]
 pub fn initialize_foundation(app: AppHandle) -> Result<FoundationStatus, String> {
-    let paths = resolve_app_paths(&app)?;
-    let storage_summary = ensure_storage(&paths)?;
-    let schema_version = initialize_database(&paths)?;
+    let (paths, storage_summary, schema_version) = ensure_foundation_ready(&app)?;
     let database_status = get_database_status_for_paths(&paths);
     let ok = storage_summary.status.ok && database_status.ok;
 
@@ -96,4 +99,45 @@ pub fn run_database_health_check(app: AppHandle) -> Result<DatabaseHealthCheck, 
 #[tauri::command]
 pub fn get_required_app_folders() -> Vec<crate::app_paths::AppFolderDescriptor> {
     required_folder_descriptors()
+}
+
+#[tauri::command]
+pub fn get_app_settings(app: AppHandle) -> Result<AppSettings, String> {
+    let (paths, _storage_summary, _schema_version) = ensure_foundation_ready(&app)?;
+    get_app_settings_for_paths(&paths)
+}
+
+#[tauri::command]
+pub fn save_app_settings(
+    app: AppHandle,
+    settings: AppSettings,
+) -> Result<SettingsSaveResult, String> {
+    let (paths, _storage_summary, _schema_version) = ensure_foundation_ready(&app)?;
+    save_app_settings_for_paths(&paths, settings)
+}
+
+#[tauri::command]
+pub fn reset_app_settings(app: AppHandle) -> Result<AppSettings, String> {
+    let (paths, _storage_summary, _schema_version) = ensure_foundation_ready(&app)?;
+    reset_app_settings_for_paths(&paths)
+}
+
+#[tauri::command]
+pub fn get_settings_summary(app: AppHandle) -> Result<SettingsSummary, String> {
+    let (paths, _storage_summary, _schema_version) = ensure_foundation_ready(&app)?;
+    get_settings_summary_for_paths(&paths)
+}
+
+#[tauri::command]
+pub fn validate_app_settings(settings: AppSettings) -> SettingsValidationResult {
+    validate_app_settings_for_payload(settings)
+}
+
+fn ensure_foundation_ready(
+    app: &AppHandle,
+) -> Result<(crate::app_paths::AppPaths, crate::storage::StorageInitSummary, i64), String> {
+    let paths = resolve_app_paths(app)?;
+    let storage_summary = ensure_storage(&paths)?;
+    let schema_version = initialize_database(&paths)?;
+    Ok((paths, storage_summary, schema_version))
 }
