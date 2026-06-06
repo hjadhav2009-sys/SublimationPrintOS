@@ -8,6 +8,7 @@ export function StatusBar() {
       <span>Storage: {phaseInfo.storage}</span>
       <span>Database: {phaseInfo.database}</span>
       <span>AI Engine: {phaseInfo.aiEngine}</span>
+      <span>Shortcuts: Enabled</span>
     </footer>
   );
 }

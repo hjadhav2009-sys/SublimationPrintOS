@@ -6,6 +6,7 @@ import {
   initializeFoundation,
   runDatabaseHealthCheck
 } from "../app/foundationApi";
+import { runAdvancedHealthCheck } from "../app/healthApi";
 import { getRecoveryStatus } from "../app/recoveryApi";
 import { Badge } from "../components/ui/Badge";
 import { Button } from "../components/ui/Button";
@@ -14,6 +15,8 @@ import type {
   DatabaseHealthCheck,
   DatabaseHealthCheckItem,
   DatabaseStatus,
+  AdvancedHealthCheckItem,
+  AdvancedHealthReport,
   HealthCheckStatus,
   RecoveryStatus,
   StorageStatus
@@ -36,6 +39,8 @@ export function HealthCheckPage() {
   const [recoveryStatus, setRecoveryStatus] = useState<RecoveryStatus | null>(
     null
   );
+  const [advancedReport, setAdvancedReport] =
+    useState<AdvancedHealthReport | null>(null);
   const [isRunning, setIsRunning] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
@@ -54,6 +59,20 @@ export function HealthCheckPage() {
       setDatabaseStatus(database);
       setDatabaseHealth(health);
       setRecoveryStatus(recovery);
+    } catch (error: unknown) {
+      setErrorMessage(commandErrorMessage(error));
+    } finally {
+      setIsRunning(false);
+    }
+  };
+
+  const runAdvancedCheck = async () => {
+    setIsRunning(true);
+    setErrorMessage(null);
+
+    try {
+      const report = await runAdvancedHealthCheck();
+      setAdvancedReport(report);
     } catch (error: unknown) {
       setErrorMessage(commandErrorMessage(error));
     } finally {
@@ -96,8 +115,15 @@ export function HealthCheckPage() {
 
     void initializeAndCheck();
 
+    const handleRunHealthCheck = () => {
+      void runAdvancedCheck();
+    };
+
+    window.addEventListener("spos:run-health-check", handleRunHealthCheck);
+
     return () => {
       isMounted = false;
+      window.removeEventListener("spos:run-health-check", handleRunHealthCheck);
     };
   }, []);
 
@@ -118,6 +144,9 @@ export function HealthCheckPage() {
         <div className="page-actions">
           <Button disabled={isRunning} onClick={runFoundationCheck} variant="primary">
             {isRunning ? "Running check" : "Run Foundation Check"}
+          </Button>
+          <Button disabled={isRunning} onClick={() => void runAdvancedCheck()} variant="secondary">
+            Run Advanced Health Check
           </Button>
           <Badge
             variant={
@@ -196,6 +225,54 @@ export function HealthCheckPage() {
         </div>
       </Card>
 
+      <Card
+        title="Advanced Health Report"
+        status={
+          <Badge variant={advancedReport?.ok ? "success" : advancedReport ? "warning" : "neutral"}>
+            {advancedReport?.message ?? "Not run yet"}
+          </Badge>
+        }
+      >
+        {advancedReport ? (
+          <>
+            <div className="summary-grid">
+              <div className="summary-item">
+                <span>Pass</span>
+                <strong>{advancedReport.summary.pass}</strong>
+              </div>
+              <div className="summary-item">
+                <span>Warn</span>
+                <strong>{advancedReport.summary.warn}</strong>
+              </div>
+              <div className="summary-item">
+                <span>Fail</span>
+                <strong>{advancedReport.summary.fail}</strong>
+              </div>
+              <div className="summary-item">
+                <span>Generated</span>
+                <strong className="path-value">{advancedReport.generated_at}</strong>
+              </div>
+            </div>
+            <div className="health-category-grid">
+              {healthCategories(advancedReport.checks).map((category) => (
+                <div className="health-category" key={category}>
+                  <h3>{category}</h3>
+                  <div className="check-list">
+                    {advancedReport.checks
+                      .filter((check) => check.category === category)
+                      .map((check) => (
+                        <AdvancedCheckRow check={check} key={check.key} />
+                      ))}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </>
+        ) : (
+          <p>Run the advanced health check to inspect system, storage, database, logs, recovery, engine, and security foundation checks.</p>
+        )}
+      </Card>
+
       <Card title="Coming later" status={<Badge variant="warning">Placeholder</Badge>}>
         <div className="check-list">
           <CheckRow
@@ -203,20 +280,29 @@ export function HealthCheckPage() {
               key: "gpu-vulkan-status",
               label: "GPU/Vulkan status",
               status: "warn",
-              message: "Coming later; no GPU check runs in this task"
-            }}
-          />
-          <CheckRow
-            check={{
-              key: "realesrgan-binary-status",
-              label: "Real-ESRGAN binary status",
-              status: "warn",
-              message: "Coming later; no engine discovery runs in this task"
+              message: "Coming later; no GPU benchmark or hardware capability test runs in this task"
             }}
           />
         </div>
       </Card>
     </section>
+  );
+}
+
+function healthCategories(checks: AdvancedHealthCheckItem[]): string[] {
+  return Array.from(new Set(checks.map((check) => check.category)));
+}
+
+function AdvancedCheckRow({ check }: { check: AdvancedHealthCheckItem }) {
+  return (
+    <div className="check-row">
+      <div>
+        <strong>{check.label}</strong>
+        <p className="muted-text">{check.message}</p>
+        {check.details ? <p className="muted-text">{check.details}</p> : null}
+      </div>
+      <Badge variant={badgeVariantForStatus(check.status)}>{check.status}</Badge>
+    </div>
   );
 }
 

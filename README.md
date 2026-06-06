@@ -30,6 +30,11 @@ This repository contains the initial desktop app shell. It does not contain prod
 - Heartbeat tracking for the active app route.
 - Previous unclean shutdown detection.
 - Safe recovery snapshot files under AppData recovery jobs.
+- Real-ESRGAN ncnn Vulkan local discovery and expected layout checks.
+- Fixed safe Real-ESRGAN test-run foundation using only AppData engine paths.
+- Advanced health report covering system, storage, database, settings, logs, diagnostics, recovery, engine, and security checks.
+- App-window keyboard shortcut framework.
+- Native app menu foundation and best-effort close/shutdown handling.
 - Basic Tauri commands:
   - `get_app_version`
   - `get_phase_info`
@@ -39,7 +44,8 @@ This repository contains the initial desktop app shell. It does not contain prod
 
 ## Intentionally Not Implemented Yet
 
-- Real-ESRGAN or image processing.
+- Real-ESRGAN production image processing.
+- Full Upscale Factory.
 - File upload or image intake.
 - Global theme application from the saved theme setting.
 - Full Design Studio autosave.
@@ -48,6 +54,10 @@ This repository contains the initial desktop app shell. It does not contain prod
 - Guaranteed close interception beyond Phase 0 best-effort frontend shutdown marking.
 - ZIP diagnostics export.
 - Open-folder actions for logs or diagnostic reports.
+- System tray.
+- Global OS-level shortcuts.
+- Full native close interception beyond Phase 0 best-effort shutdown marking.
+- Full installer.
 - Design Studio.
 - Nesting.
 - Export print sheet workflows.

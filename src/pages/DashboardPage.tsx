@@ -83,7 +83,7 @@ export function DashboardPage() {
     };
   }, []);
 
-  const refreshRecoveryStatus = async () => {
+  const refreshRecoveryStatus = async (messageOverride?: string) => {
     setIsRecoveryBusy(true);
     setRecoveryError(null);
     setRecoveryMessage(null);
@@ -91,13 +91,36 @@ export function DashboardPage() {
     try {
       const status = await getRecoveryStatus();
       setRecoveryStatus(status);
-      setRecoveryMessage(status.message);
+      setRecoveryMessage(messageOverride ?? status.message);
     } catch (error: unknown) {
       setRecoveryError(commandErrorMessage(error));
     } finally {
       setIsRecoveryBusy(false);
     }
   };
+
+  useEffect(() => {
+    const handleRecoveryStatusRefresh = (event: Event) => {
+      const message =
+        event instanceof CustomEvent &&
+        typeof event.detail?.message === "string"
+          ? event.detail.message
+          : "Recovery status refreshed";
+
+      void refreshRecoveryStatus(message);
+    };
+
+    window.addEventListener(
+      "spos:refresh-recovery-status",
+      handleRecoveryStatusRefresh
+    );
+    return () => {
+      window.removeEventListener(
+        "spos:refresh-recovery-status",
+        handleRecoveryStatusRefresh
+      );
+    };
+  }, []);
 
   const handleCreateRecoverySnapshot = async () => {
     setIsRecoveryBusy(true);
