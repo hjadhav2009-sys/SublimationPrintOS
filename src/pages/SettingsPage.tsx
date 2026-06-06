@@ -5,6 +5,7 @@ import {
   getRequiredAppFolders,
   getStorageStatus
 } from "../app/foundationApi";
+import { openManagedFolder } from "../app/shellApi";
 import {
   getAppSettings,
   resetAppSettings,
@@ -257,6 +258,22 @@ export function SettingsPage() {
     }
   }
 
+  async function handleOpenAppData() {
+    setMessage(null);
+    setErrorMessage(null);
+
+    try {
+      const result = await openManagedFolder("app_data");
+      if (result.ok) {
+        setMessage(result.message);
+      } else {
+        setErrorMessage(result.message);
+      }
+    } catch (error: unknown) {
+      setErrorMessage(commandErrorMessage(error));
+    }
+  }
+
   function updateCompanyField(
     field: keyof AppSettings["company"],
     value: string
@@ -402,8 +419,12 @@ export function SettingsPage() {
           </div>
         </div>
         <div className="page-actions align-left">
-          <Button disabled variant="secondary">
-            Open folder coming later
+          <Button
+            disabled={isSaving || isLoading}
+            onClick={() => void handleOpenAppData()}
+            variant="secondary"
+          >
+            Open AppData
           </Button>
         </div>
       </Card>

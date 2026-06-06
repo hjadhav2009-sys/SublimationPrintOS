@@ -8,6 +8,7 @@ import {
   initializeLogging,
   recordFrontendEvent
 } from "../app/logsApi";
+import { openManagedFolder } from "../app/shellApi";
 import { Badge } from "../components/ui/Badge";
 import { Button } from "../components/ui/Button";
 import { Card } from "../components/ui/Card";
@@ -15,6 +16,7 @@ import type {
   DiagnosticReportResult,
   DiagnosticsSummary,
   LogLevel,
+  OpenFolderKey,
   RecentLogEntry
 } from "../types/app";
 
@@ -183,6 +185,25 @@ export function LogsPage() {
     }
   }
 
+  async function handleOpenManagedFolder(key: OpenFolderKey) {
+    setIsBusy(true);
+    setErrorMessage(null);
+    setMessage(null);
+
+    try {
+      const result = await openManagedFolder(key);
+      if (result.ok) {
+        setMessage(result.message);
+      } else {
+        setErrorMessage(result.message);
+      }
+    } catch (error: unknown) {
+      setErrorMessage(commandErrorMessage(error));
+    } finally {
+      setIsBusy(false);
+    }
+  }
+
   return (
     <section className="page">
       <div className="page-heading">
@@ -272,6 +293,20 @@ export function LogsPage() {
           </Button>
           <Button
             disabled={isBusy}
+            onClick={() => void handleOpenManagedFolder("logs")}
+            variant="secondary"
+          >
+            Open Logs Folder
+          </Button>
+          <Button
+            disabled={isBusy}
+            onClick={() => void handleOpenManagedFolder("diagnostics")}
+            variant="secondary"
+          >
+            Open Diagnostics Folder
+          </Button>
+          <Button
+            disabled={isBusy}
             onClick={() => void handleClearLogs()}
             variant="ghost"
           >
@@ -302,8 +337,14 @@ export function LogsPage() {
             ))}
           </div>
           <div className="page-actions align-left">
-            <Button disabled variant="secondary">
-              Open report folder coming later
+            <Button
+              disabled={isBusy}
+              onClick={() =>
+                void handleOpenManagedFolder("latest_diagnostic_report")
+              }
+              variant="secondary"
+            >
+              Open Latest Report Folder
             </Button>
           </div>
         </Card>

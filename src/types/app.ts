@@ -79,6 +79,37 @@ export interface FolderStatus {
   exists: boolean;
 }
 
+export type OpenFolderKey =
+  | "app_data"
+  | "logs"
+  | "diagnostics"
+  | "latest_diagnostic_report"
+  | "recovery"
+  | "recovery_snapshots"
+  | "engine"
+  | "updates"
+  | "updates_downloaded"
+  | "updates_staged"
+  | "updates_rollback";
+
+export interface OpenFolderResult {
+  ok: boolean;
+  key: OpenFolderKey;
+  path: string;
+  message: string;
+}
+
+export interface ManagedFolderInfo {
+  key: OpenFolderKey;
+  label: string;
+  path: string;
+  exists: boolean;
+}
+
+export interface ManagedFolderPaths {
+  folders: ManagedFolderInfo[];
+}
+
 export interface StorageStatus {
   ok: boolean;
   app_data_dir: string;
@@ -362,6 +393,44 @@ export interface EngineExpectedLayout {
   instructions: string[];
 }
 
+export interface UpdateManifest {
+  package_id: string;
+  app_name: string;
+  version: string;
+  phase: string;
+  created_at: string;
+  channel: "alpha" | "beta" | "stable" | "test";
+  notes: string;
+  requires_app_min_version: string | null;
+  files: unknown[];
+}
+
+export interface OfflineUpdatePackage {
+  folder_name: string;
+  folder_path: string;
+  manifest_exists: boolean;
+  manifest_valid: boolean;
+  manifest: UpdateManifest | null;
+  errors: string[];
+  warnings: string[];
+}
+
+export interface OfflineUpdateStatus {
+  ok: boolean;
+  updates_dir: string;
+  downloaded_dir: string;
+  staged_dir: string;
+  rollback_dir: string;
+  packages: OfflineUpdatePackage[];
+  message: string;
+}
+
+export interface StageUpdateResult {
+  ok: boolean;
+  staged_package_dir: string | null;
+  message: string;
+}
+
 export type AdvancedHealthCategory =
   | "system"
   | "storage"
@@ -370,6 +439,7 @@ export type AdvancedHealthCategory =
   | "logs"
   | "diagnostics"
   | "recovery"
+  | "updates"
   | "engine"
   | "security";
 

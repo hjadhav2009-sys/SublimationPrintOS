@@ -6,6 +6,7 @@ import {
   runRealEsrganSafeTest
 } from "../app/engineApi";
 import { commandErrorMessage } from "../app/foundationApi";
+import { openManagedFolder } from "../app/shellApi";
 import { Badge } from "../components/ui/Badge";
 import { Button } from "../components/ui/Button";
 import { Card } from "../components/ui/Card";
@@ -99,6 +100,25 @@ export function UpscaleTestPage() {
     }
   };
 
+  const handleOpenEngineFolder = async () => {
+    setIsBusy(true);
+    setErrorMessage(null);
+    setMessage(null);
+
+    try {
+      const result = await openManagedFolder("engine");
+      if (result.ok) {
+        setMessage(result.message);
+      } else {
+        setErrorMessage(result.message);
+      }
+    } catch (error: unknown) {
+      setErrorMessage(commandErrorMessage(error));
+    } finally {
+      setIsBusy(false);
+    }
+  };
+
   return (
     <section className="page">
       <div className="page-heading">
@@ -130,6 +150,9 @@ export function UpscaleTestPage() {
           </Button>
           <Button disabled={isBusy} onClick={() => void handleSafeTest()} variant="secondary">
             Run Safe Test
+          </Button>
+          <Button disabled={isBusy} onClick={() => void handleOpenEngineFolder()} variant="secondary">
+            Open Engine Folder
           </Button>
           <Button disabled={isBusy} onClick={() => void handleClearOutput()} variant="ghost">
             Clear Test Output

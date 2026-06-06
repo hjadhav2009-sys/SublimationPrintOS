@@ -11,6 +11,7 @@ import {
   dismissPreviousRecoveryWarning,
   getRecoveryStatus
 } from "../app/recoveryApi";
+import { openManagedFolder } from "../app/shellApi";
 import { Badge } from "../components/ui/Badge";
 import { Button } from "../components/ui/Button";
 import { Card } from "../components/ui/Card";
@@ -173,6 +174,25 @@ export function DashboardPage() {
       const status = await clearRecoverySnapshots();
       setRecoveryStatus(status);
       setRecoveryMessage("Recovery snapshots cleared");
+    } catch (error: unknown) {
+      setRecoveryError(commandErrorMessage(error));
+    } finally {
+      setIsRecoveryBusy(false);
+    }
+  };
+
+  const handleOpenRecoveryFolder = async () => {
+    setIsRecoveryBusy(true);
+    setRecoveryError(null);
+    setRecoveryMessage(null);
+
+    try {
+      const result = await openManagedFolder("recovery");
+      if (result.ok) {
+        setRecoveryMessage(result.message);
+      } else {
+        setRecoveryError(result.message);
+      }
     } catch (error: unknown) {
       setRecoveryError(commandErrorMessage(error));
     } finally {
@@ -386,6 +406,13 @@ export function DashboardPage() {
             variant="secondary"
           >
             Refresh Recovery Status
+          </Button>
+          <Button
+            disabled={isRecoveryBusy}
+            onClick={() => void handleOpenRecoveryFolder()}
+            variant="secondary"
+          >
+            Open Recovery Folder
           </Button>
           {recoveryStatus?.previous_unclean_session ? (
             <Button

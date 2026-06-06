@@ -269,7 +269,7 @@ export function HealthCheckPage() {
             </div>
           </>
         ) : (
-          <p>Run the advanced health check to inspect system, storage, database, logs, recovery, engine, and security foundation checks.</p>
+          <p>Run the advanced health check to inspect system, storage, database, logs, recovery, updates, engine, and security foundation checks.</p>
         )}
       </Card>
 

@@ -55,6 +55,7 @@ function isAdvancedHealthCategory(value: unknown): value is AdvancedHealthCatego
     value === "logs" ||
     value === "diagnostics" ||
     value === "recovery" ||
+    value === "updates" ||
     value === "engine" ||
     value === "security"
   );
