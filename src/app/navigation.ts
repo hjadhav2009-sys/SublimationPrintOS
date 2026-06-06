@@ -19,7 +19,7 @@ export const navigationItems: NavigationItem[] = [
   {
     routeId: "upscale",
     label: "Upscale Test",
-    description: "Engine placeholder"
+    description: "Engine foundation"
   },
   {
     routeId: "logs",

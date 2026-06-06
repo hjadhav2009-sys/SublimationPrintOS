@@ -314,3 +314,104 @@ export interface RecoveryActionResult {
   status: RecoveryStatus;
   message: string;
 }
+
+export interface EngineBinaryStatus {
+  exists: boolean;
+  path: string;
+  file_name: string;
+  size_bytes: number | null;
+  last_modified: string | null;
+}
+
+export interface EngineModelStatus {
+  models_dir_exists: boolean;
+  models_dir: string;
+  model_files_count: number;
+  sample_files: string[];
+}
+
+export interface EngineDiscoveryStatus {
+  ok: boolean;
+  engine_dir: string;
+  binary: EngineBinaryStatus | null;
+  models: EngineModelStatus;
+  version_json_exists: boolean;
+  can_run_basic_command: boolean;
+  detected_version_text: string | null;
+  message: string;
+}
+
+export interface EngineTestRunResult {
+  ok: boolean;
+  attempted: boolean;
+  command_preview: string;
+  exit_code: number | null;
+  stdout_preview: string;
+  stderr_preview: string;
+  output_file: string | null;
+  message: string;
+}
+
+export interface EngineExpectedLayout {
+  engine_dir: string;
+  expected_binary_path: string;
+  expected_models_dir: string;
+  expected_version_json: string;
+  expected_test_input_path: string;
+  expected_test_output_path: string;
+  instructions: string[];
+}
+
+export type AdvancedHealthCategory =
+  | "system"
+  | "storage"
+  | "database"
+  | "settings"
+  | "logs"
+  | "diagnostics"
+  | "recovery"
+  | "engine"
+  | "security";
+
+export interface AdvancedHealthCheckItem {
+  key: string;
+  label: string;
+  category: AdvancedHealthCategory;
+  status: HealthCheckStatus;
+  message: string;
+  details: string | null;
+}
+
+export interface AdvancedHealthSummary {
+  pass: number;
+  warn: number;
+  fail: number;
+}
+
+export interface AdvancedHealthReport {
+  ok: boolean;
+  generated_at: string;
+  checks: AdvancedHealthCheckItem[];
+  summary: AdvancedHealthSummary;
+  message: string;
+}
+
+export type ShortcutAction =
+  | "dashboard"
+  | "settings"
+  | "health"
+  | "logs"
+  | "upscale"
+  | "updates"
+  | "shortcuts"
+  | "create_recovery_snapshot"
+  | "refresh_health_check";
+
+export interface ShortcutDefinition {
+  id: string;
+  label: string;
+  keys: string[];
+  description: string;
+  action: ShortcutAction;
+  phase: "Phase 0";
+}

@@ -7,6 +7,12 @@ use crate::diagnostics::{
     create_diagnostic_report_for_paths, get_diagnostics_summary_for_paths,
     DiagnosticReportResult, DiagnosticsSummary,
 };
+use crate::engine::{
+    clear_realesrgan_test_output_for_paths, discover_realesrgan_engine_for_paths,
+    get_realesrgan_expected_layout_for_paths, run_realesrgan_safe_test_for_paths,
+    EngineDiscoveryStatus, EngineExpectedLayout, EngineTestRunResult,
+};
+use crate::health::{run_advanced_health_check_for_paths, AdvancedHealthReport};
 use crate::logging::{
     clear_log_files_for_paths, get_recent_logs_for_paths, initialize_logging_for_paths,
     record_frontend_event_for_paths, LogCommandResult, RecentLogsResult,
@@ -246,6 +252,36 @@ pub fn clear_recovery_snapshots(
 ) -> Result<RecoveryStatus, String> {
     let (paths, _storage_summary, _schema_version) = ensure_foundation_ready(&app)?;
     clear_recovery_snapshots_for_paths(&paths, confirm)
+}
+
+#[tauri::command]
+pub fn discover_realesrgan_engine(app: AppHandle) -> Result<EngineDiscoveryStatus, String> {
+    let (paths, _storage_summary, _schema_version) = ensure_foundation_ready(&app)?;
+    discover_realesrgan_engine_for_paths(&paths)
+}
+
+#[tauri::command]
+pub fn get_realesrgan_expected_layout(app: AppHandle) -> Result<EngineExpectedLayout, String> {
+    let (paths, _storage_summary, _schema_version) = ensure_foundation_ready(&app)?;
+    get_realesrgan_expected_layout_for_paths(&paths)
+}
+
+#[tauri::command]
+pub fn run_realesrgan_safe_test(app: AppHandle) -> Result<EngineTestRunResult, String> {
+    let (paths, _storage_summary, _schema_version) = ensure_foundation_ready(&app)?;
+    run_realesrgan_safe_test_for_paths(&paths)
+}
+
+#[tauri::command]
+pub fn clear_realesrgan_test_output(app: AppHandle) -> Result<EngineDiscoveryStatus, String> {
+    let (paths, _storage_summary, _schema_version) = ensure_foundation_ready(&app)?;
+    clear_realesrgan_test_output_for_paths(&paths)
+}
+
+#[tauri::command]
+pub fn run_advanced_health_check(app: AppHandle) -> Result<AdvancedHealthReport, String> {
+    let (paths, _storage_summary, _schema_version) = ensure_foundation_ready(&app)?;
+    run_advanced_health_check_for_paths(&paths)
 }
 
 fn ensure_foundation_ready(

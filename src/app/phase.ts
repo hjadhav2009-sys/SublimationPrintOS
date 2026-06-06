@@ -12,7 +12,7 @@ export const phaseInfo: PhaseInfo = {
   mode: "Offline Mode",
   storage: "Local",
   database: "SQLite foundation",
-  aiEngine: "Not configured yet",
+  aiEngine: "Discovery foundation",
   status: "Foundation active"
 };
 
@@ -48,9 +48,9 @@ export const dashboardCards: DashboardCard[] = [
   {
     id: "realesrgan-engine",
     title: "Real-ESRGAN Engine",
-    status: "Coming in later prompt",
-    summary: "Phase 0 placeholder only; no image processing is implemented.",
-    nextStep: "Wire engine discovery and test execution in a later task."
+    status: "Discovery foundation",
+    summary: "Local Real-ESRGAN ncnn Vulkan discovery and fixed safe test-run checks are available.",
+    nextStep: "Use this only for engine readiness; full Upscale Factory comes later."
   },
   {
     id: "health-check",

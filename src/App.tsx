@@ -1,10 +1,16 @@
+import { listen } from "@tauri-apps/api/event";
 import { useEffect, useMemo, useState } from "react";
 import {
+  createRecoverySnapshot,
   initializeRecovery,
   markRecoveryCleanShutdown,
   updateRecoveryHeartbeat
 } from "./app/recoveryApi";
 import { DEFAULT_ROUTE, getRouteFromHash, routes } from "./app/routes";
+import {
+  findShortcutForEvent,
+  shouldIgnoreShortcut
+} from "./app/shortcuts";
 import { AppLayout } from "./components/layout/AppLayout";
 import { DashboardPage } from "./pages/DashboardPage";
 import { HealthCheckPage } from "./pages/HealthCheckPage";
@@ -40,6 +46,14 @@ export default function App() {
   const [currentRoute, setCurrentRoute] = useState<RouteId>(() =>
     getRouteFromHash(window.location.hash)
   );
+
+  function navigateToRoute(routeId: RouteId) {
+    const nextPath = routes[routeId].path;
+    if (window.location.hash !== `#${nextPath}`) {
+      window.location.hash = nextPath;
+    }
+    setCurrentRoute(routeId);
+  }
 
   useEffect(() => {
     const handleHashChange = () => {
@@ -101,18 +115,110 @@ export default function App() {
     };
   }, []);
 
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (shouldIgnoreShortcut(event)) {
+        return;
+      }
+
+      const shortcut = findShortcutForEvent(event);
+      if (!shortcut) {
+        return;
+      }
+
+      event.preventDefault();
+      if (
+        shortcut.action === "dashboard" ||
+        shortcut.action === "settings" ||
+        shortcut.action === "health" ||
+        shortcut.action === "logs" ||
+        shortcut.action === "upscale" ||
+        shortcut.action === "updates" ||
+        shortcut.action === "shortcuts"
+      ) {
+        navigateToRoute(shortcut.action);
+        return;
+      }
+
+      if (shortcut.action === "create_recovery_snapshot") {
+        void createRecoverySnapshot(
+          "keyboard_shortcut_snapshot",
+          recoveryActiveRoute
+        ).catch(() => {
+          // Shortcut-created recovery snapshots are best-effort in Phase 0.
+        });
+        return;
+      }
+
+      if (shortcut.action === "refresh_health_check") {
+        navigateToRoute("health");
+        window.dispatchEvent(new CustomEvent("spos:run-health-check"));
+      }
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, []);
+
+  useEffect(() => {
+    let removeMenuListener: (() => void) | null = null;
+
+    void listen<string>("spos-menu-event", (event) => {
+      handleMenuAction(event.payload);
+    })
+      .then((unlisten) => {
+        removeMenuListener = unlisten;
+      })
+      .catch(() => {
+        // Browser preview does not provide Tauri menu events.
+      });
+
+    return () => {
+      removeMenuListener?.();
+    };
+  }, []);
+
+  function handleMenuAction(action: string) {
+    if (
+      action === "dashboard" ||
+      action === "settings" ||
+      action === "health" ||
+      action === "logs"
+    ) {
+      navigateToRoute(action);
+      return;
+    }
+
+    if (action === "discover_engine") {
+      navigateToRoute("upscale");
+      window.setTimeout(() => {
+        window.dispatchEvent(new CustomEvent("spos:discover-engine"));
+      }, 0);
+      return;
+    }
+
+    if (action === "run_advanced_health") {
+      navigateToRoute("health");
+      window.setTimeout(() => {
+        window.dispatchEvent(new CustomEvent("spos:run-health-check"));
+      }, 0);
+      return;
+    }
+
+    if (action === "about") {
+      window.alert("SublimationPrintOS\nPhase 0 Foundation\nOffline local-first desktop app.");
+      return;
+    }
+
+    if (action === "phase_status") {
+      window.alert("Phase 0: Foundation systems only. Production workflows are not implemented yet.");
+    }
+  }
+
   const CurrentPage = useMemo(() => pageComponents[currentRoute], [currentRoute]);
 
-  const handleNavigate = (routeId: RouteId) => {
-    const nextPath = routes[routeId].path;
-    if (window.location.hash !== `#${nextPath}`) {
-      window.location.hash = nextPath;
-    }
-    setCurrentRoute(routeId);
-  };
-
   return (
-    <AppLayout currentRoute={currentRoute} onNavigate={handleNavigate}>
+    <AppLayout currentRoute={currentRoute} onNavigate={navigateToRoute}>
       <CurrentPage />
     </AppLayout>
   );
