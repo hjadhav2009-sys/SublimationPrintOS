@@ -100,8 +100,14 @@ export function DashboardPage() {
   };
 
   useEffect(() => {
-    const handleRecoveryStatusRefresh = () => {
-      void refreshRecoveryStatus("Recovery snapshot created from menu");
+    const handleRecoveryStatusRefresh = (event: Event) => {
+      const message =
+        event instanceof CustomEvent &&
+        typeof event.detail?.message === "string"
+          ? event.detail.message
+          : "Recovery status refreshed";
+
+      void refreshRecoveryStatus(message);
     };
 
     window.addEventListener(

@@ -54,6 +54,9 @@ export default function App() {
   );
   const [pendingPageAction, setPendingPageAction] =
     useState<PendingPageAction>(null);
+  const [pendingRecoveryMessage, setPendingRecoveryMessage] = useState<
+    string | null
+  >(null);
 
   function navigateToRoute(routeId: RouteId) {
     const nextPath = routes[routeId].path;
@@ -106,10 +109,17 @@ export default function App() {
       pendingPageAction === "refresh-recovery-status" &&
       currentRoute === "dashboard"
     ) {
-      window.dispatchEvent(new CustomEvent("spos:refresh-recovery-status"));
+      window.dispatchEvent(
+        new CustomEvent("spos:refresh-recovery-status", {
+          detail: {
+            message: pendingRecoveryMessage ?? "Recovery status refreshed"
+          }
+        })
+      );
+      setPendingRecoveryMessage(null);
       setPendingPageAction(null);
     }
-  }, [pendingPageAction, currentRoute]);
+  }, [pendingPageAction, pendingRecoveryMessage, currentRoute]);
 
   useEffect(() => {
     if (!recoveryLifecycleStarted) {
@@ -235,9 +245,23 @@ export default function App() {
       return;
     }
 
-    if (action === "recovery_snapshot_created") {
-      setPendingPageAction("refresh-recovery-status");
-      navigateToRoute("dashboard");
+    if (action === "create_recovery_snapshot") {
+      void createRecoverySnapshot(
+        "menu_recovery_snapshot",
+        recoveryActiveRoute
+      )
+        .then(() => {
+          setPendingRecoveryMessage("Recovery snapshot created from menu");
+          setPendingPageAction("refresh-recovery-status");
+          navigateToRoute("dashboard");
+        })
+        .catch(() => {
+          setPendingRecoveryMessage(
+            "Recovery snapshot from menu failed. Check Logs for details."
+          );
+          setPendingPageAction("refresh-recovery-status");
+          navigateToRoute("dashboard");
+        });
       return;
     }
 

@@ -84,12 +84,7 @@ fn main() {
                 "menu_about" => emit_menu_event(app, "about"),
                 "menu_phase_status" => emit_menu_event(app, "phase_status"),
                 "menu_create_recovery_snapshot" => {
-                    let _ = commands::create_recovery_snapshot(
-                        app.clone(),
-                        "menu_recovery_snapshot".to_string(),
-                        None,
-                    );
-                    emit_menu_event(app, "recovery_snapshot_created");
+                    emit_menu_event(app, "create_recovery_snapshot");
                 }
                 "menu_quit" => {
                     let _ = commands::mark_recovery_clean_shutdown(app.clone());
