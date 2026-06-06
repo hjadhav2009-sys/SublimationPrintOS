@@ -11,6 +11,12 @@ use crate::logging::{
     clear_log_files_for_paths, get_recent_logs_for_paths, initialize_logging_for_paths,
     record_frontend_event_for_paths, LogCommandResult, RecentLogsResult,
 };
+use crate::recovery::{
+    clear_recovery_snapshots_for_paths, create_recovery_snapshot_for_paths,
+    dismiss_previous_recovery_warning_for_paths, get_recovery_status_for_paths,
+    initialize_recovery_for_paths, mark_recovery_clean_shutdown_for_paths,
+    update_recovery_heartbeat_for_paths, RecoveryActionResult, RecoveryStatus,
+};
 use crate::settings::{
     get_app_settings_for_paths, get_settings_summary_for_paths, reset_app_settings_for_paths,
     save_app_settings_for_paths, validate_app_settings_for_payload, AppSettings,
@@ -185,6 +191,61 @@ pub fn clear_log_files(app: AppHandle, confirm: String) -> Result<DiagnosticsSum
     let (paths, _storage_summary, _schema_version) = ensure_foundation_ready(&app)?;
     clear_log_files_for_paths(&paths, confirm)?;
     get_diagnostics_summary_for_paths(&paths)
+}
+
+#[tauri::command]
+pub fn initialize_recovery(
+    app: AppHandle,
+    active_route: Option<String>,
+) -> Result<RecoveryStatus, String> {
+    let (paths, _storage_summary, _schema_version) = ensure_foundation_ready(&app)?;
+    initialize_recovery_for_paths(&paths, active_route)
+}
+
+#[tauri::command]
+pub fn update_recovery_heartbeat(
+    app: AppHandle,
+    active_route: Option<String>,
+) -> Result<RecoveryStatus, String> {
+    let (paths, _storage_summary, _schema_version) = ensure_foundation_ready(&app)?;
+    update_recovery_heartbeat_for_paths(&paths, active_route)
+}
+
+#[tauri::command]
+pub fn mark_recovery_clean_shutdown(app: AppHandle) -> Result<RecoveryStatus, String> {
+    let (paths, _storage_summary, _schema_version) = ensure_foundation_ready(&app)?;
+    mark_recovery_clean_shutdown_for_paths(&paths)
+}
+
+#[tauri::command]
+pub fn get_recovery_status(app: AppHandle) -> Result<RecoveryStatus, String> {
+    let (paths, _storage_summary, _schema_version) = ensure_foundation_ready(&app)?;
+    get_recovery_status_for_paths(&paths)
+}
+
+#[tauri::command]
+pub fn create_recovery_snapshot(
+    app: AppHandle,
+    reason: String,
+    active_route: Option<String>,
+) -> Result<RecoveryActionResult, String> {
+    let (paths, _storage_summary, _schema_version) = ensure_foundation_ready(&app)?;
+    create_recovery_snapshot_for_paths(&paths, reason, active_route)
+}
+
+#[tauri::command]
+pub fn dismiss_previous_recovery_warning(app: AppHandle) -> Result<RecoveryStatus, String> {
+    let (paths, _storage_summary, _schema_version) = ensure_foundation_ready(&app)?;
+    dismiss_previous_recovery_warning_for_paths(&paths)
+}
+
+#[tauri::command]
+pub fn clear_recovery_snapshots(
+    app: AppHandle,
+    confirm: String,
+) -> Result<RecoveryStatus, String> {
+    let (paths, _storage_summary, _schema_version) = ensure_foundation_ready(&app)?;
+    clear_recovery_snapshots_for_paths(&paths, confirm)
 }
 
 fn ensure_foundation_ready(

@@ -270,3 +270,47 @@ export interface FrontendLogEvent {
   message: string;
   metadata: Record<string, unknown> | null;
 }
+
+export interface RecoverySession {
+  session_id: string;
+  started_at: string;
+  last_heartbeat_at: string;
+  clean_shutdown: boolean;
+  app_version: string;
+  phase: "Phase 0";
+  active_route: string | null;
+  notes: string | null;
+}
+
+export interface RecoverySnapshot {
+  snapshot_id: string;
+  created_at: string;
+  session_id: string;
+  reason: string;
+  active_route: string | null;
+  settings_summary: Record<string, unknown> | null;
+  foundation_summary: Record<string, unknown> | null;
+  diagnostics_summary: Record<string, unknown> | null;
+}
+
+export interface RecoverySnapshotSummary {
+  snapshot_id: string;
+  created_at: string;
+  reason: string;
+  file_name: string;
+}
+
+export interface RecoveryStatus {
+  ok: boolean;
+  recovery_dir: string;
+  current_session: RecoverySession | null;
+  previous_unclean_session: RecoverySession | null;
+  snapshots: RecoverySnapshotSummary[];
+  message: string;
+}
+
+export interface RecoveryActionResult {
+  ok: boolean;
+  status: RecoveryStatus;
+  message: string;
+}

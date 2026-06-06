@@ -5,9 +5,16 @@ import {
   initializeFoundation
 } from "../app/foundationApi";
 import { dashboardCards } from "../app/phase";
+import {
+  clearRecoverySnapshots,
+  createRecoverySnapshot,
+  dismissPreviousRecoveryWarning,
+  getRecoveryStatus
+} from "../app/recoveryApi";
 import { Badge } from "../components/ui/Badge";
+import { Button } from "../components/ui/Button";
 import { Card } from "../components/ui/Card";
-import type { FoundationStatus } from "../types/app";
+import type { FoundationStatus, RecoveryStatus } from "../types/app";
 
 type BackendStatus = "checking" | "connected" | "not-connected";
 type FoundationRunState = "initializing" | "ready" | "warning" | "error";
@@ -19,6 +26,12 @@ export function DashboardPage() {
   const [foundationState, setFoundationState] =
     useState<FoundationRunState>("initializing");
   const [foundationError, setFoundationError] = useState<string | null>(null);
+  const [recoveryStatus, setRecoveryStatus] = useState<RecoveryStatus | null>(
+    null
+  );
+  const [recoveryMessage, setRecoveryMessage] = useState<string | null>(null);
+  const [recoveryError, setRecoveryError] = useState<string | null>(null);
+  const [isRecoveryBusy, setIsRecoveryBusy] = useState(false);
 
   useEffect(() => {
     let isMounted = true;
@@ -51,10 +64,98 @@ export function DashboardPage() {
         }
       });
 
+    getRecoveryStatus()
+      .then((status) => {
+        if (isMounted) {
+          setRecoveryStatus(status);
+          setRecoveryMessage(status.message);
+          setRecoveryError(null);
+        }
+      })
+      .catch((error: unknown) => {
+        if (isMounted) {
+          setRecoveryError(commandErrorMessage(error));
+        }
+      });
+
     return () => {
       isMounted = false;
     };
   }, []);
+
+  const refreshRecoveryStatus = async () => {
+    setIsRecoveryBusy(true);
+    setRecoveryError(null);
+    setRecoveryMessage(null);
+
+    try {
+      const status = await getRecoveryStatus();
+      setRecoveryStatus(status);
+      setRecoveryMessage(status.message);
+    } catch (error: unknown) {
+      setRecoveryError(commandErrorMessage(error));
+    } finally {
+      setIsRecoveryBusy(false);
+    }
+  };
+
+  const handleCreateRecoverySnapshot = async () => {
+    setIsRecoveryBusy(true);
+    setRecoveryError(null);
+    setRecoveryMessage(null);
+
+    try {
+      const result = await createRecoverySnapshot(
+        "dashboard_manual_snapshot",
+        "dashboard"
+      );
+      setRecoveryStatus(result.status);
+      setRecoveryMessage(result.message);
+    } catch (error: unknown) {
+      setRecoveryError(commandErrorMessage(error));
+    } finally {
+      setIsRecoveryBusy(false);
+    }
+  };
+
+  const handleDismissRecoveryWarning = async () => {
+    setIsRecoveryBusy(true);
+    setRecoveryError(null);
+    setRecoveryMessage(null);
+
+    try {
+      const status = await dismissPreviousRecoveryWarning();
+      setRecoveryStatus(status);
+      setRecoveryMessage("Previous unclean session warning dismissed");
+    } catch (error: unknown) {
+      setRecoveryError(commandErrorMessage(error));
+    } finally {
+      setIsRecoveryBusy(false);
+    }
+  };
+
+  const handleClearRecoverySnapshots = async () => {
+    const confirmed = window.confirm(
+      "Clear local recovery snapshots? This cannot be undone."
+    );
+    if (!confirmed) {
+      return;
+    }
+
+    setIsRecoveryBusy(true);
+    setRecoveryError(null);
+    setRecoveryMessage(null);
+
+    try {
+      const status = await clearRecoverySnapshots();
+      setRecoveryStatus(status);
+      setRecoveryMessage("Recovery snapshots cleared");
+    } catch (error: unknown) {
+      setRecoveryError(commandErrorMessage(error));
+    } finally {
+      setIsRecoveryBusy(false);
+    }
+  };
 
   const backendLabel =
     backendStatus === "checking"
@@ -167,6 +268,119 @@ export function DashboardPage() {
               : `Foundation initialization failed: ${foundationError ?? "Unknown error"}`}
           </p>
         )}
+      </Card>
+
+      <Card
+        eyebrow="Phase 0 recovery marker"
+        status={
+          <Badge
+            variant={
+              recoveryStatus?.previous_unclean_session
+                ? "warning"
+                : recoveryStatus?.current_session
+                  ? "success"
+                  : "info"
+            }
+          >
+            {recoveryStatus?.previous_unclean_session
+              ? "Warning"
+              : recoveryStatus?.current_session
+                ? "Ready"
+                : "Not initialized"}
+          </Badge>
+        }
+        title="Crash Recovery"
+      >
+        {recoveryStatus?.previous_unclean_session ? (
+          <div className="notice notice-warning">
+            Previous app session did not shut down cleanly. Your production
+            files are not restored yet; this is a Phase 0 recovery marker only.
+          </div>
+        ) : null}
+        {recoveryError ? (
+          <div className="notice notice-warning">{recoveryError}</div>
+        ) : null}
+        {recoveryMessage ? (
+          <div className="notice notice-success">{recoveryMessage}</div>
+        ) : null}
+
+        <div className="summary-grid">
+          <div className="summary-item">
+            <span>Status</span>
+            <strong>
+              {recoveryStatus?.previous_unclean_session
+                ? "Warning"
+                : recoveryStatus?.current_session
+                  ? "Ready"
+                  : "Not initialized"}
+            </strong>
+          </div>
+          <div className="summary-item">
+            <span>Current session</span>
+            <strong className="path-value">
+              {recoveryStatus?.current_session?.session_id ?? "Not available"}
+            </strong>
+          </div>
+          <div className="summary-item">
+            <span>Last heartbeat</span>
+            <strong className="path-value">
+              {recoveryStatus?.current_session?.last_heartbeat_at ??
+                "Not available"}
+            </strong>
+          </div>
+          <div className="summary-item">
+            <span>Snapshots</span>
+            <strong>{recoveryStatus?.snapshots.length ?? 0}</strong>
+          </div>
+        </div>
+
+        <div className="kv-list">
+          <div className="kv-row">
+            <span>Recovery folder</span>
+            <span className="path-value">
+              {recoveryStatus?.recovery_dir ?? "Not loaded yet"}
+            </span>
+          </div>
+          <div className="kv-row">
+            <span>Active route</span>
+            <span>
+              {recoveryStatus?.current_session?.active_route ?? "Not recorded"}
+            </span>
+          </div>
+        </div>
+
+        <div className="settings-actions">
+          <Button
+            disabled={isRecoveryBusy}
+            onClick={() => void handleCreateRecoverySnapshot()}
+            variant="primary"
+          >
+            Create Recovery Snapshot
+          </Button>
+          <Button
+            disabled={isRecoveryBusy}
+            onClick={() => void refreshRecoveryStatus()}
+            variant="secondary"
+          >
+            Refresh Recovery Status
+          </Button>
+          {recoveryStatus?.previous_unclean_session ? (
+            <Button
+              disabled={isRecoveryBusy}
+              onClick={() => void handleDismissRecoveryWarning()}
+              variant="secondary"
+            >
+              Dismiss Warning
+            </Button>
+          ) : null}
+          <Button
+            disabled={isRecoveryBusy}
+            onClick={() => void handleClearRecoverySnapshots()}
+            variant="ghost"
+          >
+            Clear Snapshots
+          </Button>
+        </div>
       </Card>
 
       <div className="card-grid">

@@ -4,7 +4,7 @@ SublimationPrintOS is an offline Windows desktop production operating system for
 
 ## Current Phase
 
-Phase 0: Foundation scaffold with local storage, SQLite, and settings persistence.
+Phase 0: Foundation scaffold with local storage, SQLite, settings persistence, logs, diagnostics, and crash recovery markers.
 
 This repository contains the initial desktop app shell. It does not contain production workflow features yet.
 
@@ -26,6 +26,10 @@ This repository contains the initial desktop app shell. It does not contain prod
 - SQLite audit log integration for foundation diagnostics events.
 - Logs page viewer for recent local log and audit entries.
 - Safe diagnostic report folder generation under AppData diagnostics.
+- Crash recovery session marker under AppData.
+- Heartbeat tracking for the active app route.
+- Previous unclean shutdown detection.
+- Safe recovery snapshot files under AppData recovery jobs.
 - Basic Tauri commands:
   - `get_app_version`
   - `get_phase_info`
@@ -38,7 +42,10 @@ This repository contains the initial desktop app shell. It does not contain prod
 - Real-ESRGAN or image processing.
 - File upload or image intake.
 - Global theme application from the saved theme setting.
-- Crash recovery.
+- Full Design Studio autosave.
+- Production job restore.
+- Binary asset recovery.
+- Guaranteed close interception beyond Phase 0 best-effort frontend shutdown marking.
 - ZIP diagnostics export.
 - Open-folder actions for logs or diagnostic reports.
 - Design Studio.
@@ -153,4 +160,4 @@ npm run tauri:build
 
 ## Next Development Step
 
-Recommended next task: expand Phase 0 health checks, logs, or crash recovery without building production workflow features.
+Recommended next task: add the basic Real-ESRGAN discovery/test foundation without building upload or production workflows.
