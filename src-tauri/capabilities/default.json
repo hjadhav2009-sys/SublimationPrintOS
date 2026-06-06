@@ -1,0 +1,7 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "default",
+  "description": "Default Phase 0 permissions for the main SublimationPrintOS window.",
+  "windows": ["main"],
+  "permissions": ["core:default"]
+}

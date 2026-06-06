@@ -1,0 +1,105 @@
+# Incident Response Plan
+
+> **Document ID:** SEC-08  
+> **File:** `SublimationPrintOS_Incident_Response_Plan.md`  
+> **Category:** Security & Compliance  
+> **Phase:** Phase 1-2  
+> **Owner:** Security Lead + Tech Lead  
+> **Version:** 1.0  
+> **Status:** Draft for development handoff  
+> **Project:** SublimationPrintOS  
+
+---
+
+## 1. Purpose
+
+Define the security and compliance baseline for local user data, roles, audit logs, encryption options, update safety, vulnerability handling, incident response, and software licensing. Security starts early, even though the full documents mature in Phase 1-2.
+
+This document focuses specifically on **Incident Response Plan** and converts the idea into rules, requirements, checklists, and acceptance criteria that can be given to the development team.
+
+## 2. Scope
+
+SublimationPrintOS is an offline Windows desktop production operating system for dye-sublimation businesses. The scope of these documents is pure sublimation production: image intake, AI upscaling, quality checks, Canva-like design studio, design store, order basket, nesting, export, hardware handoff, color management, production reporting, diagnostics, installation, settings, and maintenance. These documents deliberately exclude inventory management, CRM, RTO/returns, shipping/logistics tracking, revenue accounting, GST invoicing, supplier management, salesperson commission, and loyalty systems.
+
+## 3. Related Modules
+
+- Local data protection
+- Access control
+- Encryption
+- Audit logs
+- Vulnerability assessment
+- Incident response
+- License
+
+## 4. Phase Alignment
+
+
+| Phase | Name | Core Documentation Impact |
+|---|---|---|
+| Phase 0 | Foundation & Installation | UI shell, installer, SQLite/AppData, settings, Real-ESRGAN basic integration, health check, crash recovery, shortcuts. |
+| Phase 1 | Upscale Factory & Design Store | Image intake, batch queue, quality checks, metadata, search, approvals, versioning. |
+| Phase 2 | Design Studio | Canva-like editor, templates, objects, text, images, effects, canvas/layers. |
+| Phase 3 | Order Basket & Print Sheet Builder | Production basket, nesting, margins/gaps/bleed, manual layout, marks/mirroring. |
+| Phase 4 | Export & Color Management | PDF/PNG/JPG/ZIP export, ICC profiles, registration marks, soft proofing. |
+| Phase 5 | Hardware Integration | Printer discovery, cutter integration, RIP hot folders, press timer, diagnostics. |
+| Phase 6 | Reports, Testing & Polish | Production reports, release readiness, QA hardening, user documentation, go-live. |
+| Ongoing | Management + QA | Risk, change, defects, code review, regression, automation, project ceremonies. |
+
+
+## 5. Key Requirements
+
+- Keep user data local-first and avoid unnecessary network transmission.
+- Apply role-based access to Admin, Designer, Worker, and Viewer workflows.
+- Validate all file paths, imported files, update packages, and external process inputs.
+- Use audit logs for admin actions, settings changes, exports, updates, and destructive operations.
+- Diagnostics must be redacted and must not include design contents by default.
+
+## 6. Security Baseline
+
+- Core product works offline and keeps production data local by default.
+- Admin, Designer, Worker, and Viewer roles must be enforced in the UI and backend commands.
+- Installer and update packages must be hash/signature verified before installation.
+- Crash reports and diagnostics must not include user design files by default.
+- Audit logs should capture settings changes, exports, destructive actions, and admin operations.
+
+## 7. Incident Steps
+
+- Identify: capture symptom, affected build, module, data risk, and first report time.
+- Contain: pause risky operation, disable update/package/plugin if needed.
+- Eradicate: patch root cause, verify with tests, review logs.
+- Recover: restore backup, rerun health check, confirm user workflow.
+- Review: write incident report and update prevention controls.
+
+## 8. Implementation Checklist
+
+- [ ] Review this document with the owner: Security Lead + Tech Lead.
+- [ ] Create implementation tickets for Incident Response Plan.
+- [ ] Link each ticket to phase, milestone, acceptance criteria, and test evidence.
+- [ ] Update UI/API/database/hardware/test docs if this document changes another area.
+- [ ] Add logging, validation, and failure handling requirements before implementation starts.
+- [ ] Review against the out-of-scope list before approving development.
+
+## 9. Acceptance Criteria
+
+- [ ] The document is understandable by a new developer without oral explanation.
+- [ ] All requirements are traceable to a module, phase, owner, and acceptance test.
+- [ ] The document does not introduce out-of-scope inventory/CRM/RTO/shipping/accounting features.
+- [ ] The document contains clear implementation checklists and review criteria.
+- [ ] The document can be versioned in Git and reviewed through the change-management process.
+- [ ] The document reduces risk without making the offline workflow difficult.
+- [ ] The controls can be tested and audited.
+
+## 10. Review Questions
+
+- Does this document support the correct phase and not pull later-phase work too early?
+- Can the feature be tested on a clean Windows machine or simulated environment?
+- Does it protect local user data and avoid accidental data loss?
+- Does it include clear fallback behavior when GPU, file system, database, hardware, or user input fails?
+- Does it help the sublimation production workflow move faster, safer, or with less waste?
+
+## 11. Handoff Notes
+
+- Store this file in the project repository under `docs/sec/`.
+- Review cadence: at phase start, before milestone exit, and whenever a Type B or Type C change affects this area.
+- Primary audience: Security Lead + Tech Lead and any developer assigned to Local data protection, Access control, Encryption, Audit logs, Vulnerability assessment, Incident response, ....
+- This document is part of the 111-document documentation pack and should be kept consistent with functional requirements, non-functional requirements, roadmap, milestone plan, risk register, and change management.
