@@ -4,8 +4,9 @@ use crate::settings::get_app_settings_for_paths;
 use chrono::Utc;
 use rusqlite::{params, Connection, OptionalExtension};
 use serde::Serialize;
-use std::fs;
-use std::io::ErrorKind;
+use sha2::{Digest, Sha256};
+use std::fs::{self, File};
+use std::io::{BufReader, ErrorKind, Read};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -1188,27 +1189,25 @@ fn remove_temp_file_if_safe(destination_dir: &Path, temp_path: &Path) -> Result<
 }
 
 fn sha256_file(path: &Path) -> Result<String, String> {
-    let script = "
-        param([string]$Path)
-        $hash = Get-FileHash -Algorithm SHA256 -LiteralPath $Path
-        $hash.Hash.ToLowerInvariant()
-    ";
-    let output = Command::new("powershell")
-        .args(["-NoProfile", "-NonInteractive", "-Command", script])
-        .arg(path)
-        .output()
-        .map_err(|error| format!("Unable to run local SHA-256 hash command: {error}"))?;
+    ensure_regular_file_metadata(path, "Source image")?;
 
-    if !output.status.success() {
-        return Err("Unable to hash selected image with local SHA-256 command".to_string());
+    let file = File::open(path)
+        .map_err(|error| format!("Unable to open selected image for SHA-256 hashing: {error}"))?;
+    let mut reader = BufReader::new(file);
+    let mut hasher = Sha256::new();
+    let mut buffer = [0_u8; 64 * 1024];
+
+    loop {
+        let bytes_read = reader
+            .read(&mut buffer)
+            .map_err(|error| format!("Unable to read selected image for SHA-256 hashing: {error}"))?;
+        if bytes_read == 0 {
+            break;
+        }
+        hasher.update(&buffer[..bytes_read]);
     }
 
-    let hash = String::from_utf8_lossy(&output.stdout).trim().to_string();
-    if hash.len() == 64 && hash.chars().all(|value| value.is_ascii_hexdigit()) {
-        Ok(hash)
-    } else {
-        Err("Local SHA-256 hash command returned an unexpected value".to_string())
-    }
+    Ok(format!("{:x}", hasher.finalize()))
 }
 
 fn supported_extension(path: &Path) -> Option<String> {
