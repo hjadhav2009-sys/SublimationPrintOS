@@ -1,13 +1,16 @@
 use chrono::Utc;
 use rusqlite::{params, Connection};
 
-pub const CURRENT_SCHEMA_VERSION: i64 = 1;
+pub const CURRENT_SCHEMA_VERSION: i64 = 2;
 
 pub fn run_migrations(connection: &mut Connection) -> Result<i64, String> {
     ensure_migration_table(connection)?;
 
-    if !migration_applied(connection, CURRENT_SCHEMA_VERSION)? {
+    if !migration_applied(connection, 1)? {
         apply_foundation_migration(connection)?;
+    }
+    if !migration_applied(connection, 2)? {
+        apply_upscale_queue_migration(connection)?;
     }
 
     Ok(CURRENT_SCHEMA_VERSION)
@@ -96,12 +99,12 @@ fn apply_foundation_migration(connection: &mut Connection) -> Result<(), String>
     transaction
         .execute(
             "INSERT INTO schema_migrations (version, name, applied_at) VALUES (?1, ?2, ?3)",
-            params![CURRENT_SCHEMA_VERSION, "foundation tables", applied_at],
+            params![1, "foundation tables", applied_at],
         )
         .map_err(|error| format!("Unable to record foundation migration: {error}"))?;
 
     let metadata_json = serde_json::json!({
-        "version": CURRENT_SCHEMA_VERSION,
+        "version": 1,
         "name": "foundation tables"
     })
     .to_string();
@@ -124,4 +127,69 @@ fn apply_foundation_migration(connection: &mut Connection) -> Result<(), String>
     transaction
         .commit()
         .map_err(|error| format!("Unable to commit foundation migration: {error}"))
+}
+
+fn apply_upscale_queue_migration(connection: &mut Connection) -> Result<(), String> {
+    let transaction = connection
+        .transaction()
+        .map_err(|error| format!("Unable to start migration transaction: {error}"))?;
+
+    transaction
+        .execute_batch(
+            "
+            CREATE TABLE IF NOT EXISTS upscale_queue_items (
+                id TEXT PRIMARY KEY,
+                file_asset_id TEXT NOT NULL,
+                status TEXT NOT NULL,
+                desired_scale_factor INTEGER NOT NULL,
+                desired_output_format TEXT NOT NULL,
+                source_kind TEXT NOT NULL,
+                notes TEXT,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                FOREIGN KEY(file_asset_id) REFERENCES file_assets(id)
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_upscale_queue_status
+                ON upscale_queue_items(status);
+            CREATE INDEX IF NOT EXISTS idx_upscale_queue_created_at
+                ON upscale_queue_items(created_at);
+            CREATE INDEX IF NOT EXISTS idx_upscale_queue_file_asset_id
+                ON upscale_queue_items(file_asset_id);
+            ",
+        )
+        .map_err(|error| format!("Unable to apply upscale queue migration schema: {error}"))?;
+
+    let applied_at = Utc::now().to_rfc3339();
+    transaction
+        .execute(
+            "INSERT INTO schema_migrations (version, name, applied_at) VALUES (?1, ?2, ?3)",
+            params![2, "upscale queue foundation", applied_at],
+        )
+        .map_err(|error| format!("Unable to record upscale queue migration: {error}"))?;
+
+    let metadata_json = serde_json::json!({
+        "version": 2,
+        "name": "upscale queue foundation"
+    })
+    .to_string();
+
+    transaction
+        .execute(
+            "
+            INSERT INTO audit_logs (event_type, message, metadata_json, created_at)
+            VALUES (?1, ?2, ?3, ?4)
+            ",
+            params![
+                "migration_applied",
+                "Applied migration 2: upscale queue foundation",
+                metadata_json,
+                Utc::now().to_rfc3339()
+            ],
+        )
+        .map_err(|error| format!("Unable to record migration audit log: {error}"))?;
+
+    transaction
+        .commit()
+        .map_err(|error| format!("Unable to commit upscale queue migration: {error}"))
 }

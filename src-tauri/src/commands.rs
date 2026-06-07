@@ -39,6 +39,13 @@ use crate::updates::{
     validate_offline_update_package_for_paths, OfflineUpdatePackage, OfflineUpdateStatus,
     StageUpdateResult,
 };
+use crate::upscale_intake::{
+    clear_upscale_queue_for_paths, get_upscale_intake_summary_for_paths,
+    get_upscale_queue_for_paths, import_images_from_folder_dialog_for_paths,
+    import_images_with_dialog_for_paths, remove_upscale_queue_item_for_paths,
+    update_upscale_queue_item_settings_for_paths, ImageImportResult, UpscaleIntakeSummary,
+    UpscaleQueueItem, UpscaleQueueResponse,
+};
 use serde::Serialize;
 use serde_json::Value;
 use tauri::AppHandle;
@@ -343,6 +350,67 @@ pub fn clear_staged_update(
 pub fn create_sample_update_manifest(app: AppHandle) -> Result<OfflineUpdateStatus, String> {
     let (paths, _storage_summary, _schema_version) = ensure_foundation_ready(&app)?;
     create_sample_update_manifest_for_paths(&paths)
+}
+
+#[tauri::command]
+pub fn import_images_with_dialog(app: AppHandle) -> Result<ImageImportResult, String> {
+    let (paths, _storage_summary, _schema_version) = ensure_foundation_ready(&app)?;
+    import_images_with_dialog_for_paths(&paths)
+}
+
+#[tauri::command]
+pub fn import_images_from_folder_dialog(app: AppHandle) -> Result<ImageImportResult, String> {
+    let (paths, _storage_summary, _schema_version) = ensure_foundation_ready(&app)?;
+    import_images_from_folder_dialog_for_paths(&paths)
+}
+
+#[tauri::command]
+pub fn get_upscale_queue(
+    app: AppHandle,
+    include_removed: bool,
+) -> Result<UpscaleQueueResponse, String> {
+    let (paths, _storage_summary, _schema_version) = ensure_foundation_ready(&app)?;
+    get_upscale_queue_for_paths(&paths, include_removed)
+}
+
+#[tauri::command]
+pub fn update_upscale_queue_item_settings(
+    app: AppHandle,
+    queue_item_id: String,
+    desired_scale_factor: i64,
+    desired_output_format: String,
+) -> Result<UpscaleQueueItem, String> {
+    let (paths, _storage_summary, _schema_version) = ensure_foundation_ready(&app)?;
+    update_upscale_queue_item_settings_for_paths(
+        &paths,
+        queue_item_id,
+        desired_scale_factor,
+        desired_output_format,
+    )
+}
+
+#[tauri::command]
+pub fn remove_upscale_queue_item(
+    app: AppHandle,
+    queue_item_id: String,
+) -> Result<UpscaleQueueResponse, String> {
+    let (paths, _storage_summary, _schema_version) = ensure_foundation_ready(&app)?;
+    remove_upscale_queue_item_for_paths(&paths, queue_item_id)
+}
+
+#[tauri::command]
+pub fn clear_upscale_queue(
+    app: AppHandle,
+    confirm: String,
+) -> Result<UpscaleQueueResponse, String> {
+    let (paths, _storage_summary, _schema_version) = ensure_foundation_ready(&app)?;
+    clear_upscale_queue_for_paths(&paths, confirm)
+}
+
+#[tauri::command]
+pub fn get_upscale_intake_summary(app: AppHandle) -> Result<UpscaleIntakeSummary, String> {
+    let (paths, _storage_summary, _schema_version) = ensure_foundation_ready(&app)?;
+    get_upscale_intake_summary_for_paths(&paths)
 }
 
 fn ensure_foundation_ready(

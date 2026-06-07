@@ -31,6 +31,7 @@ const ALLOWED_MODULES: &[&str] = &[
     "settings",
     "health",
     "diagnostics",
+    "upscale",
     "frontend",
 ];
 const MAX_EVENT_LENGTH: usize = 80;
@@ -217,6 +218,7 @@ pub fn write_log_entry(paths: &AppPaths, entry: &AppLogEntry) -> Result<(), Stri
         "database" => targets.push(DATABASE_LOG_FILE.to_string()),
         "settings" => targets.push(SETTINGS_LOG_FILE.to_string()),
         "diagnostics" | "health" => targets.push(DIAGNOSTICS_LOG_FILE.to_string()),
+        "upscale" => targets.push(DIAGNOSTICS_LOG_FILE.to_string()),
         _ => {}
     }
 

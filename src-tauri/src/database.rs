@@ -215,6 +215,12 @@ pub fn run_database_health_check_for_paths(paths: &AppPaths) -> DatabaseHealthCh
         "app_meta table",
         "app_meta",
     ));
+    checks.push(table_check(
+        &connection,
+        "upscale_queue_items_table",
+        "upscale_queue_items table",
+        "upscale_queue_items",
+    ));
 
     match current_schema_version(&connection) {
         Ok(Some(version)) => checks.push(check(

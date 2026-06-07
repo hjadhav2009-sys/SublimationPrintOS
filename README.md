@@ -4,7 +4,7 @@ SublimationPrintOS is an offline Windows desktop production operating system for
 
 ## Current Phase
 
-Phase 0: Foundation scaffold with local storage, SQLite, settings persistence, logs, diagnostics, crash recovery markers, controlled folder actions, and an offline update shell.
+Phase 1 has started with Upscale Factory image intake and queue foundation on top of the Phase 0 local storage, SQLite, settings, logs, diagnostics, crash recovery, controlled folder actions, and offline update shell.
 
 This repository contains the initial desktop app shell. It does not contain production workflow features yet.
 
@@ -34,6 +34,10 @@ This repository contains the initial desktop app shell. It does not contain prod
 - Safe recovery snapshot files under AppData recovery jobs.
 - Real-ESRGAN ncnn Vulkan local discovery and expected layout checks.
 - Fixed safe Real-ESRGAN test-run foundation using only AppData engine paths.
+- Local image intake through backend native file/folder dialogs.
+- Raw image asset registry in SQLite using the existing `file_assets` table.
+- Upscale queue foundation in SQLite.
+- Per-item queue scale/output setting updates and queue removal without deleting raw assets.
 - Advanced health report covering system, storage, database, settings, logs, diagnostics, recovery, updates, engine, and security checks.
 - App-window keyboard shortcut framework.
 - Native app menu foundation and best-effort close/shutdown handling.
@@ -65,8 +69,12 @@ Design Store, Design Studio, and Print Sheet Builder are shown as future product
 ## Intentionally Not Implemented Yet
 
 - Real-ESRGAN production image processing.
-- Full Upscale Factory.
-- File upload or image intake.
+- Full Upscale Factory processing.
+- Batch AI upscaling.
+- Before/after preview.
+- Auto quality check.
+- Design Store save/approval.
+- Web upload or arbitrary-path image intake.
 - Global theme application from the saved theme setting.
 - Full Design Studio autosave.
 - Production job restore.

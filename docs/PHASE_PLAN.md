@@ -12,13 +12,15 @@ Logs and diagnostics foundation is completed with local JSONL log files, SQLite 
 
 Crash recovery foundation is completed with local session markers, heartbeat tracking, previous unclean shutdown detection, and safe recovery snapshots. Full Design Studio autosave and production job restore remain reserved for later prompts.
 
-Real-ESRGAN foundation is completed for local binary discovery, expected layout reporting, and fixed safe test-run only. Full Upscale Factory, image intake, and production image processing remain reserved for later prompts.
+Real-ESRGAN foundation is completed for local binary discovery, expected layout reporting, and fixed safe test-run only. Full Upscale Factory processing and production image processing remain reserved for later prompts.
 
 Advanced health checks, app-window shortcuts, native menu actions, best-effort close handling, controlled open-folder actions, and the offline update metadata shell are completed as Phase 0 foundations. System tray, global OS shortcuts, online update checks, update installation, and installer polish remain later work.
 
 ## Phase 1
 
 Upscale Factory and Design Store.
+
+Upscale Factory image intake and queue foundation started. Local images can be copied into AppData, registered in SQLite, and queued for future AI processing. Real AI upscaling, batch processing, previews, quality checks, and Design Store save/approval remain later Phase 1 work.
 
 ## Phase 2
 

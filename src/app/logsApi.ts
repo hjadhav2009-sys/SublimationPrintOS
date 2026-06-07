@@ -100,6 +100,7 @@ function isLogModule(value: unknown): value is LogModule {
     value === "settings" ||
     value === "health" ||
     value === "diagnostics" ||
+    value === "upscale" ||
     value === "frontend"
   );
 }

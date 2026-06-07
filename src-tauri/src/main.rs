@@ -11,6 +11,7 @@ mod settings;
 mod shell_actions;
 mod storage;
 mod updates;
+mod upscale_intake;
 
 use tauri::menu::{Menu, MenuItem, PredefinedMenuItem, Submenu};
 use tauri::{Emitter, Manager, WindowEvent};
@@ -153,7 +154,14 @@ fn main() {
             commands::validate_offline_update_package,
             commands::stage_offline_update_package,
             commands::clear_staged_update,
-            commands::create_sample_update_manifest
+            commands::create_sample_update_manifest,
+            commands::import_images_with_dialog,
+            commands::import_images_from_folder_dialog,
+            commands::get_upscale_queue,
+            commands::update_upscale_queue_item_settings,
+            commands::remove_upscale_queue_item,
+            commands::clear_upscale_queue,
+            commands::get_upscale_intake_summary
         ])
         .run(tauri::generate_context!())
         .expect("error while running SublimationPrintOS");
