@@ -5,8 +5,8 @@ use chrono::Utc;
 use rusqlite::{params, Connection, OptionalExtension};
 use serde::Serialize;
 use sha2::{Digest, Sha256};
-use std::fs;
-use std::io::{ErrorKind, Read};
+use std::fs::{self, File};
+use std::io::{BufReader, ErrorKind, Read};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -1191,13 +1191,14 @@ fn remove_temp_file_if_safe(destination_dir: &Path, temp_path: &Path) -> Result<
 fn sha256_file(path: &Path) -> Result<String, String> {
     ensure_regular_file_metadata(path, "Source image")?;
 
-    let mut file = fs::File::open(path)
+    let file = File::open(path)
         .map_err(|error| format!("Unable to open selected image for SHA-256 hashing: {error}"))?;
+    let mut reader = BufReader::new(file);
     let mut hasher = Sha256::new();
     let mut buffer = [0_u8; 64 * 1024];
 
     loop {
-        let bytes_read = file
+        let bytes_read = reader
             .read(&mut buffer)
             .map_err(|error| format!("Unable to read selected image for SHA-256 hashing: {error}"))?;
         if bytes_read == 0 {
