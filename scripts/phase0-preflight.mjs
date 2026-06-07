@@ -11,7 +11,12 @@ const requiredFiles = [
   "docs/PRODUCT_BRIEF.md",
   "docs/PHASE_PLAN.md",
   "README.md",
-  ".gitignore"
+  ".gitignore",
+  "release/ALPHA0_BUILD_CHECKLIST.md",
+  "release/ALPHA0_RELEASE_READINESS.md",
+  "release/ALPHA0_MANUAL_SMOKE_TEST.md",
+  "release/KNOWN_ISSUES_ALPHA0.md",
+  "scripts/phase0-qa.mjs"
 ];
 
 const ignoredPaths = ["dist", "node_modules", "src-tauri/target"];
@@ -25,7 +30,8 @@ const requiredScripts = [
   "phase0:preflight",
   "phase0:check",
   "phase0:package",
-  "phase0:inspect"
+  "phase0:inspect",
+  "phase0:qa"
 ];
 const results = [];
 const warnings = [];

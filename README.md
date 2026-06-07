@@ -43,6 +43,10 @@ This repository contains the initial desktop app shell. It does not contain prod
 - Local packaging preflight for Phase 0 source and ignore-rule checks.
 - Build artifact inspection scripts for local Tauri outputs.
 - Alpha 0 checklist, release notes template, and packaging notes.
+- Phase 0 QA script for repeatable local readiness checks.
+- Alpha 0 release readiness docs.
+- Manual smoke test checklist.
+- Known issues list for Alpha 0 review.
 - Basic Tauri commands:
   - `get_app_version`
   - `get_phase_info`
@@ -67,12 +71,14 @@ This repository contains the initial desktop app shell. It does not contain prod
 - Full installer.
 - Signed installer.
 - GitHub release publishing.
+- Public release publishing.
 - Online updater.
 - Auto-download of updates.
 - Update installation or apply flow.
 - Real release channel.
 - ZIP extraction for update packages.
 - App binary replacement.
+- Production workflow modules.
 - Design Studio.
 - Nesting.
 - Export print sheet workflows.
@@ -130,6 +136,7 @@ npm run phase0:preflight
 npm run phase0:check
 npm run phase0:package
 npm run phase0:inspect
+npm run phase0:qa
 ```
 
 ## Build Commands
@@ -159,6 +166,23 @@ npm run phase0:inspect
 
 `phase0:package` runs a local Tauri build when packaging dependencies are available. AppData is created at runtime and is not bundled. Do not commit installer files, `dist/`, `node_modules/`, `src-tauri/target/`, `app.db`, Real-ESRGAN binaries, or test images.
 
+## Alpha 0 QA
+
+Alpha 0 is a local developer build only. It is not a public production release.
+
+```bash
+npm run phase0:qa
+npm run phase0:preflight
+npm run phase0:check
+npm run phase0:inspect
+npm run tauri:dev
+npm run phase0:package
+```
+
+Before reviewing the repository in GitHub Code tab, set the default branch to `main`:
+
+`GitHub Settings -> Branches -> Default branch -> main`
+
 ## Basic Coding Standards
 
 - Keep TypeScript strict and avoid `any` unless a later feature has a clear boundary that requires it.
@@ -187,10 +211,14 @@ npm run phase0:inspect
 |   `-- DOC_INDEX.md
 |-- release/
 |   |-- ALPHA0_BUILD_CHECKLIST.md
+|   |-- ALPHA0_MANUAL_SMOKE_TEST.md
+|   |-- ALPHA0_RELEASE_READINESS.md
+|   |-- KNOWN_ISSUES_ALPHA0.md
 |   |-- PACKAGING_NOTES.md
 |   `-- RELEASE_NOTES_TEMPLATE.md
 |-- scripts/
 |   |-- inspect-build-artifacts.mjs
+|   |-- phase0-qa.mjs
 |   `-- phase0-preflight.mjs
 |-- src/
 |   |-- app/
