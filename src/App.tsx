@@ -12,9 +12,13 @@ import {
   shouldIgnoreShortcut
 } from "./app/shortcuts";
 import { AppLayout } from "./components/layout/AppLayout";
+import { AlphaChecklistPage } from "./pages/AlphaChecklistPage";
 import { DashboardPage } from "./pages/DashboardPage";
+import { DesignStorePage } from "./pages/DesignStorePage";
+import { DesignStudioPage } from "./pages/DesignStudioPage";
 import { HealthCheckPage } from "./pages/HealthCheckPage";
 import { LogsPage } from "./pages/LogsPage";
+import { PrintSheetBuilderPage } from "./pages/PrintSheetBuilderPage";
 import { SettingsPage } from "./pages/SettingsPage";
 import { ShortcutsPage } from "./pages/ShortcutsPage";
 import { UpdatesPage } from "./pages/UpdatesPage";
@@ -23,12 +27,16 @@ import type { RouteId } from "./types/app";
 
 const pageComponents: Record<RouteId, () => JSX.Element> = {
   dashboard: DashboardPage,
+  designStore: DesignStorePage,
+  designStudio: DesignStudioPage,
+  printSheetBuilder: PrintSheetBuilderPage,
   settings: SettingsPage,
   health: HealthCheckPage,
   upscale: UpscaleTestPage,
   logs: LogsPage,
   updates: UpdatesPage,
-  shortcuts: ShortcutsPage
+  shortcuts: ShortcutsPage,
+  alphaChecklist: AlphaChecklistPage
 };
 
 type PendingPageAction =
@@ -225,9 +233,16 @@ export default function App() {
   function handleMenuAction(action: string) {
     if (
       action === "dashboard" ||
+      action === "designStore" ||
+      action === "designStudio" ||
+      action === "printSheetBuilder" ||
       action === "settings" ||
       action === "health" ||
-      action === "logs"
+      action === "upscale" ||
+      action === "logs" ||
+      action === "updates" ||
+      action === "shortcuts" ||
+      action === "alphaChecklist"
     ) {
       navigateToRoute(action);
       return;
@@ -266,12 +281,10 @@ export default function App() {
     }
 
     if (action === "about") {
-      window.alert("SublimationPrintOS\nPhase 0 Foundation\nOffline local-first desktop app.");
+      window.alert(
+        "SublimationPrintOS\nPhase 0 Alpha\nProduction workspace for sublimation design, upscaling, nesting, export, and system tools."
+      );
       return;
-    }
-
-    if (action === "phase_status") {
-      window.alert("Phase 0: Foundation systems only. Production workflows are not implemented yet.");
     }
   }
 

@@ -12,8 +12,10 @@ This repository contains the initial desktop app shell. It does not contain prod
 
 - Tauri + React + TypeScript + Vite project foundation.
 - Dark-mode production-floor UI shell.
-- Dashboard-first layout with sidebar navigation.
-- Phase 0 placeholder pages for Dashboard, Settings, Health Check, Upscale Test, Logs, Updates, and Shortcuts.
+- Home-first layout with grouped Workspace, System, and Help navigation.
+- Phase 0 UI/UX navigation reorganized around production modules and system tools.
+- Production modules are visible by phase and clearly marked as not implemented where appropriate.
+- Phase 0 placeholder pages for Home, Upscale Factory, Design Store, Design Studio, Print Sheet Builder, System Health, Logs & Diagnostics, Settings, Offline Updates, Keyboard Shortcuts, and Alpha 0 Checklist.
 - Typed placeholder data for dashboard cards, settings sections, health checks, and shortcuts.
 - AppData folder initialization using the OS data directory.
 - SQLite database creation at the local AppData root.
@@ -53,6 +55,12 @@ This repository contains the initial desktop app shell. It does not contain prod
   - `ping_backend`
 - Documentation index for the small practical docs under `docs/`.
 - Developer scripts for local web and desktop development.
+
+## Phase 0 UI/UX Navigation
+
+Home separates production workspace entry points from system/admin tools. Technical foundation details stay available through System Health, Logs & Diagnostics, Settings, and Offline Updates instead of overwhelming the first screen.
+
+Design Store, Design Studio, and Print Sheet Builder are shown as future production modules only. They are locked placeholders and are not production features yet.
 
 ## Intentionally Not Implemented Yet
 

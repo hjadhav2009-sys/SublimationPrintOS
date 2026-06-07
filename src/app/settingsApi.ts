@@ -74,12 +74,16 @@ function isNullableString(value: unknown): value is string | null {
 function isRouteId(value: unknown): value is RouteId {
   return (
     value === "dashboard" ||
+    value === "designStore" ||
+    value === "designStudio" ||
+    value === "printSheetBuilder" ||
     value === "settings" ||
     value === "health" ||
     value === "upscale" ||
     value === "logs" ||
     value === "updates" ||
-    value === "shortcuts"
+    value === "shortcuts" ||
+    value === "alphaChecklist"
   );
 }
 
