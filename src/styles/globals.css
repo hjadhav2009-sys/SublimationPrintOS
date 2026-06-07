@@ -577,6 +577,13 @@ textarea {
   gap: 10px;
 }
 
+.queue-summary-card {
+  border-color: rgba(79, 209, 165, 0.34);
+  box-shadow:
+    0 0 0 1px rgba(79, 209, 165, 0.08),
+    var(--shadow-panel);
+}
+
 .summary-item {
   display: grid;
   gap: 5px;
@@ -737,6 +744,12 @@ textarea {
   display: grid;
   gap: 8px;
   overflow-x: auto;
+}
+
+.queue-count-label {
+  color: var(--color-text);
+  font-size: 0.88rem;
+  font-weight: 800;
 }
 
 .queue-row {
