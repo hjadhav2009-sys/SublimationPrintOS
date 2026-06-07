@@ -4,21 +4,41 @@ import {
   commandErrorMessage,
   initializeFoundation
 } from "../app/foundationApi";
-import { dashboardCards } from "../app/phase";
-import {
-  clearRecoverySnapshots,
-  createRecoverySnapshot,
-  dismissPreviousRecoveryWarning,
-  getRecoveryStatus
-} from "../app/recoveryApi";
-import { openManagedFolder } from "../app/shellApi";
+import { getDiagnosticsSummary } from "../app/logsApi";
+import { routes } from "../app/routes";
+import { getRecoveryStatus } from "../app/recoveryApi";
 import { Badge } from "../components/ui/Badge";
 import { Button } from "../components/ui/Button";
 import { Card } from "../components/ui/Card";
-import type { FoundationStatus, RecoveryStatus } from "../types/app";
+import { ModuleCard } from "../components/ui/ModuleCard";
+import { StatusPill } from "../components/ui/StatusPill";
+import type {
+  DiagnosticsSummary,
+  FoundationStatus,
+  RecoveryStatus,
+  RouteId
+} from "../types/app";
 
 type BackendStatus = "checking" | "connected" | "not-connected";
 type FoundationRunState = "initializing" | "ready" | "warning" | "error";
+
+const readyNowItems = [
+  "Local AppData storage",
+  "SQLite database",
+  "Settings save/reload",
+  "Logs and diagnostics",
+  "Crash recovery marker",
+  "Real-ESRGAN discovery/test shell",
+  "Offline update metadata shell",
+  "Alpha 0 QA scripts"
+];
+
+const comingNextItems = [
+  "Phase 1 Upscale Factory",
+  "Phase 1 Design Store",
+  "Phase 2 Design Studio",
+  "Phase 3 Print Sheet Builder"
+];
 
 export function DashboardPage() {
   const [backendStatus, setBackendStatus] = useState<BackendStatus>("checking");
@@ -30,54 +50,61 @@ export function DashboardPage() {
   const [recoveryStatus, setRecoveryStatus] = useState<RecoveryStatus | null>(
     null
   );
-  const [recoveryMessage, setRecoveryMessage] = useState<string | null>(null);
-  const [recoveryError, setRecoveryError] = useState<string | null>(null);
-  const [isRecoveryBusy, setIsRecoveryBusy] = useState(false);
+  const [diagnosticsSummary, setDiagnosticsSummary] =
+    useState<DiagnosticsSummary | null>(null);
+  const [systemMessage, setSystemMessage] = useState<string | null>(null);
+  const [systemError, setSystemError] = useState<string | null>(null);
 
   useEffect(() => {
     let isMounted = true;
 
-    invoke<string>("ping_backend")
-      .then((response) => {
+    const loadHomeStatus = async () => {
+      try {
+        const pingResponse = await invoke<string>("ping_backend");
         if (isMounted) {
-          setBackendStatus(response === "pong" ? "connected" : "not-connected");
+          setBackendStatus(
+            pingResponse === "pong" ? "connected" : "not-connected"
+          );
         }
-      })
-      .catch(() => {
+      } catch {
         if (isMounted) {
           setBackendStatus("not-connected");
         }
-      });
+      }
 
-    initializeFoundation()
-      .then((status) => {
+      try {
+        const status = await initializeFoundation();
         if (isMounted) {
           setFoundationStatus(status);
           setFoundationState(status.ok ? "ready" : "warning");
           setFoundationError(null);
         }
-      })
-      .catch((error: unknown) => {
+      } catch (error: unknown) {
         if (isMounted) {
           setFoundationStatus(null);
           setFoundationState("error");
           setFoundationError(commandErrorMessage(error));
         }
-      });
+      }
 
-    getRecoveryStatus()
-      .then((status) => {
+      try {
+        const [recovery, diagnostics] = await Promise.all([
+          getRecoveryStatus(),
+          getDiagnosticsSummary()
+        ]);
         if (isMounted) {
-          setRecoveryStatus(status);
-          setRecoveryMessage(status.message);
-          setRecoveryError(null);
+          setRecoveryStatus(recovery);
+          setDiagnosticsSummary(diagnostics);
+          setSystemError(null);
         }
-      })
-      .catch((error: unknown) => {
+      } catch (error: unknown) {
         if (isMounted) {
-          setRecoveryError(commandErrorMessage(error));
+          setSystemError(commandErrorMessage(error));
         }
-      });
+      }
+    };
+
+    void loadHomeStatus();
 
     return () => {
       isMounted = false;
@@ -85,18 +112,15 @@ export function DashboardPage() {
   }, []);
 
   const refreshRecoveryStatus = async (messageOverride?: string) => {
-    setIsRecoveryBusy(true);
-    setRecoveryError(null);
-    setRecoveryMessage(null);
+    setSystemError(null);
+    setSystemMessage(null);
 
     try {
       const status = await getRecoveryStatus();
       setRecoveryStatus(status);
-      setRecoveryMessage(messageOverride ?? status.message);
+      setSystemMessage(messageOverride ?? status.message);
     } catch (error: unknown) {
-      setRecoveryError(commandErrorMessage(error));
-    } finally {
-      setIsRecoveryBusy(false);
+      setSystemError(commandErrorMessage(error));
     }
   };
 
@@ -123,329 +147,202 @@ export function DashboardPage() {
     };
   }, []);
 
-  const handleCreateRecoverySnapshot = async () => {
-    setIsRecoveryBusy(true);
-    setRecoveryError(null);
-    setRecoveryMessage(null);
+  const foundationReady =
+    backendStatus === "connected" &&
+    foundationState === "ready" &&
+    Boolean(foundationStatus?.storage_ok) &&
+    Boolean(foundationStatus?.database_ok);
 
-    try {
-      const result = await createRecoverySnapshot(
-        "dashboard_manual_snapshot",
-        "dashboard"
-      );
-      setRecoveryStatus(result.status);
-      setRecoveryMessage(result.message);
-    } catch (error: unknown) {
-      setRecoveryError(commandErrorMessage(error));
-    } finally {
-      setIsRecoveryBusy(false);
-    }
-  };
-
-  const handleDismissRecoveryWarning = async () => {
-    setIsRecoveryBusy(true);
-    setRecoveryError(null);
-    setRecoveryMessage(null);
-
-    try {
-      const status = await dismissPreviousRecoveryWarning();
-      setRecoveryStatus(status);
-      setRecoveryMessage("Previous unclean session warning dismissed");
-    } catch (error: unknown) {
-      setRecoveryError(commandErrorMessage(error));
-    } finally {
-      setIsRecoveryBusy(false);
-    }
-  };
-
-  const handleClearRecoverySnapshots = async () => {
-    const confirmed = window.confirm(
-      "Clear local recovery snapshots? This cannot be undone."
+  const attentionNeeded =
+    backendStatus === "not-connected" ||
+    foundationState === "warning" ||
+    foundationState === "error" ||
+    Boolean(recoveryStatus?.previous_unclean_session) ||
+    Boolean(
+      diagnosticsSummary?.ok && diagnosticsSummary.recent_error_count > 0
     );
-    if (!confirmed) {
-      return;
-    }
-
-    setIsRecoveryBusy(true);
-    setRecoveryError(null);
-    setRecoveryMessage(null);
-
-    try {
-      const status = await clearRecoverySnapshots();
-      setRecoveryStatus(status);
-      setRecoveryMessage("Recovery snapshots cleared");
-    } catch (error: unknown) {
-      setRecoveryError(commandErrorMessage(error));
-    } finally {
-      setIsRecoveryBusy(false);
-    }
-  };
-
-  const handleOpenRecoveryFolder = async () => {
-    setIsRecoveryBusy(true);
-    setRecoveryError(null);
-    setRecoveryMessage(null);
-
-    try {
-      const result = await openManagedFolder("recovery");
-      if (result.ok) {
-        setRecoveryMessage(result.message);
-      } else {
-        setRecoveryError(result.message);
-      }
-    } catch (error: unknown) {
-      setRecoveryError(commandErrorMessage(error));
-    } finally {
-      setIsRecoveryBusy(false);
-    }
-  };
-
-  const backendLabel =
-    backendStatus === "checking"
-      ? "Backend: Checking"
-      : backendStatus === "connected"
-        ? "Backend: Connected"
-        : "Backend: Not connected";
 
   return (
-    <section className="page page-dashboard">
-      <div className="page-heading">
-        <div>
-          <p className="eyebrow">Dashboard</p>
-          <h2>Phase 0 foundation scaffold</h2>
+    <section className="page page-home">
+      <header className="home-hero">
+        <div className="home-hero-copy">
+          <p className="eyebrow">Production workspace</p>
+          <h2>Welcome to SublimationPrintOS</h2>
           <p>
-            Local-first desktop foundation for sublimation print production.
-            These cards are scaffold only and do not represent completed
-            production features.
+            Prepare designs, upscale images, build print sheets, and manage
+            local production tools.
           </p>
         </div>
-        <div className="page-actions">
-          <Badge
-            variant={
-              backendStatus === "connected"
-                ? "success"
-                : backendStatus === "checking"
-                  ? "info"
-                  : "warning"
-            }
-          >
-            {backendLabel}
-          </Badge>
-          <Badge
-            variant={
-              foundationState === "ready"
-                ? "success"
-                : foundationState === "initializing"
-                  ? "info"
-                  : "warning"
-            }
-          >
-            Foundation: {foundationState}
+        <div className="home-hero-badges" aria-label="Workspace status">
+          <Badge variant="info">Phase 0 Alpha</Badge>
+          <Badge variant="success">Local-first</Badge>
+          <Badge variant="success">Offline</Badge>
+          <Badge variant={foundationReady ? "success" : "warning"}>
+            {foundationReady ? "Foundation Ready" : "Needs Attention"}
           </Badge>
         </div>
+      </header>
+
+      {foundationError ? (
+        <div className="notice notice-warning">{foundationError}</div>
+      ) : null}
+      {systemError ? (
+        <div className="notice notice-warning">{systemError}</div>
+      ) : null}
+      {systemMessage ? (
+        <div className="notice notice-success">{systemMessage}</div>
+      ) : null}
+
+      <div className="module-card-grid">
+        <ModuleCard
+          buttonLabel="Start Setup"
+          description="Check local Real-ESRGAN placement and run the fixed safe engine test."
+          phase="Phase 0"
+          status="Foundation available"
+          statusVariant="ready"
+          title="Start Upscale Setup"
+          onAction={() => navigateToRoute("upscale")}
+        />
+        <ModuleCard
+          buttonLabel="View Placeholder"
+          description="Browse, tag, approve, and reuse sublimation designs when Phase 1 begins."
+          phase="Phase 1"
+          status="Coming soon"
+          statusVariant="locked"
+          title="Open Design Store"
+          onAction={() => navigateToRoute("designStore")}
+        />
+        <ModuleCard
+          buttonLabel="View Placeholder"
+          description="Open the future print design editor without pretending it is available yet."
+          phase="Phase 2"
+          status="Coming soon"
+          statusVariant="locked"
+          title="Open Design Studio"
+          onAction={() => navigateToRoute("designStudio")}
+        />
+        <ModuleCard
+          buttonLabel="View Placeholder"
+          description="Prepare for order baskets, nesting, mirror, marks, and export workflows."
+          phase="Phase 3"
+          status="Coming soon"
+          statusVariant="locked"
+          title="Build Print Sheet"
+          onAction={() => navigateToRoute("printSheetBuilder")}
+        />
       </div>
 
       <Card
-        eyebrow="Local-first foundation"
+        className="system-snapshot-card"
+        eyebrow="Today"
         status={
-          <Badge
-            variant={
-              foundationState === "ready"
-                ? "success"
-                : foundationState === "initializing"
-                  ? "info"
-                  : "warning"
-            }
-          >
-            {foundationStatus?.message ?? "Initializing foundation"}
+          <Badge variant={attentionNeeded ? "warning" : "success"}>
+            {attentionNeeded ? "Review system tools" : "Workspace ready"}
           </Badge>
         }
-        title="AppData and SQLite status"
+        title="System Snapshot"
       >
-        {foundationStatus ? (
-          <>
-            <div className="summary-grid">
-              <div className="summary-item">
-                <span>Storage</span>
-                <strong>{foundationStatus.storage_ok ? "Ready" : "Warning"}</strong>
-              </div>
-              <div className="summary-item">
-                <span>Database</span>
-                <strong>
-                  {foundationStatus.database_ok ? "Ready" : "Warning"}
-                </strong>
-              </div>
-              <div className="summary-item">
-                <span>Schema version</span>
-                <strong>{foundationStatus.schema_version}</strong>
-              </div>
-              <div className="summary-item">
-                <span>Folders</span>
-                <strong>
-                  {foundationStatus.folders_created} created /{" "}
-                  {foundationStatus.folders_existing} existing
-                </strong>
-              </div>
-            </div>
-            <div className="kv-list">
-              <div className="kv-row">
-                <span>AppData path</span>
-                <span className="path-value">{foundationStatus.app_data_dir}</span>
-              </div>
-              <div className="kv-row">
-                <span>Database path</span>
-                <span className="path-value">
-                  {foundationStatus.database_path}
-                </span>
-              </div>
-              <div className="kv-row">
-                <span>Missing folders</span>
-                <span>{foundationStatus.folders_missing}</span>
-              </div>
-            </div>
-          </>
-        ) : (
-          <p>
-            {foundationState === "initializing"
-              ? "Creating AppData folders and preparing app.db."
-              : `Foundation initialization failed: ${foundationError ?? "Unknown error"}`}
-          </p>
-        )}
-      </Card>
-
-      <Card
-        eyebrow="Phase 0 recovery marker"
-        status={
-          <Badge
-            variant={
+        <div className="snapshot-grid">
+          <SnapshotItem
+            label="AppData"
+            status={foundationStatus?.storage_ok ? "Ready" : "Needs check"}
+            tone={foundationStatus?.storage_ok ? "ready" : "warning"}
+          />
+          <SnapshotItem
+            label="Database"
+            status={foundationStatus?.database_ok ? "Ready" : "Needs check"}
+            tone={foundationStatus?.database_ok ? "ready" : "warning"}
+          />
+          <SnapshotItem
+            label="Recovery"
+            status={
+              recoveryStatus?.previous_unclean_session
+                ? "Needs review"
+                : recoveryStatus?.current_session
+                  ? "Active"
+                  : "Not loaded"
+            }
+            tone={
               recoveryStatus?.previous_unclean_session
                 ? "warning"
                 : recoveryStatus?.current_session
-                  ? "success"
+                  ? "ready"
                   : "info"
             }
-          >
-            {recoveryStatus?.previous_unclean_session
-              ? "Warning"
-              : recoveryStatus?.current_session
-                ? "Ready"
-                : "Not initialized"}
-          </Badge>
-        }
-        title="Crash Recovery"
-      >
-        {recoveryStatus?.previous_unclean_session ? (
-          <div className="notice notice-warning">
-            Previous app session did not shut down cleanly. Your production
-            files are not restored yet; this is a Phase 0 recovery marker only.
-          </div>
-        ) : null}
-        {recoveryError ? (
-          <div className="notice notice-warning">{recoveryError}</div>
-        ) : null}
-        {recoveryMessage ? (
-          <div className="notice notice-success">{recoveryMessage}</div>
-        ) : null}
-
-        <div className="summary-grid">
-          <div className="summary-item">
-            <span>Status</span>
-            <strong>
-              {recoveryStatus?.previous_unclean_session
-                ? "Warning"
-                : recoveryStatus?.current_session
-                  ? "Ready"
-                  : "Not initialized"}
-            </strong>
-          </div>
-          <div className="summary-item">
-            <span>Current session</span>
-            <strong className="path-value">
-              {recoveryStatus?.current_session?.session_id ?? "Not available"}
-            </strong>
-          </div>
-          <div className="summary-item">
-            <span>Last heartbeat</span>
-            <strong className="path-value">
-              {recoveryStatus?.current_session?.last_heartbeat_at ??
-                "Not available"}
-            </strong>
-          </div>
-          <div className="summary-item">
-            <span>Snapshots</span>
-            <strong>{recoveryStatus?.snapshots.length ?? 0}</strong>
-          </div>
+          />
+          <SnapshotItem
+            label="Logs"
+            status={
+              diagnosticsSummary?.ok
+                ? `${diagnosticsSummary.recent_error_count} recent errors`
+                : "Not loaded"
+            }
+            tone={
+              diagnosticsSummary?.ok && diagnosticsSummary.recent_error_count > 0
+                ? "warning"
+                : diagnosticsSummary?.ok
+                  ? "ready"
+                  : "info"
+            }
+          />
+          <SnapshotItem label="Engine" status="Not checked" tone="info" />
         </div>
-
-        <div className="kv-list">
-          <div className="kv-row">
-            <span>Recovery folder</span>
-            <span className="path-value">
-              {recoveryStatus?.recovery_dir ?? "Not loaded yet"}
-            </span>
-          </div>
-          <div className="kv-row">
-            <span>Active route</span>
-            <span>
-              {recoveryStatus?.current_session?.active_route ?? "Not recorded"}
-            </span>
-          </div>
-        </div>
-
-        <div className="settings-actions">
-          <Button
-            disabled={isRecoveryBusy}
-            onClick={() => void handleCreateRecoverySnapshot()}
-            variant="primary"
-          >
-            Create Recovery Snapshot
+        <div className="page-actions align-left">
+          <Button onClick={() => navigateToRoute("health")} variant="secondary">
+            Open System Health
           </Button>
-          <Button
-            disabled={isRecoveryBusy}
-            onClick={() => void refreshRecoveryStatus()}
-            variant="secondary"
-          >
-            Refresh Recovery Status
+          <Button onClick={() => navigateToRoute("logs")} variant="secondary">
+            Open Logs
           </Button>
-          <Button
-            disabled={isRecoveryBusy}
-            onClick={() => void handleOpenRecoveryFolder()}
-            variant="secondary"
-          >
-            Open Recovery Folder
-          </Button>
-          {recoveryStatus?.previous_unclean_session ? (
-            <Button
-              disabled={isRecoveryBusy}
-              onClick={() => void handleDismissRecoveryWarning()}
-              variant="secondary"
-            >
-              Dismiss Warning
-            </Button>
-          ) : null}
-          <Button
-            disabled={isRecoveryBusy}
-            onClick={() => void handleClearRecoverySnapshots()}
-            variant="ghost"
-          >
-            Clear Snapshots
+          <Button onClick={() => navigateToRoute("settings")} variant="ghost">
+            Open Settings
           </Button>
         </div>
       </Card>
 
-      <div className="card-grid">
-        {dashboardCards.map((card) => (
-          <Card
-            eyebrow="Phase 0 placeholder"
-            key={card.id}
-            status={<Badge variant="info">{card.status}</Badge>}
-            title={card.title}
-          >
-            <p>{card.summary}</p>
-            <p className="muted-text">{card.nextStep}</p>
-          </Card>
-        ))}
+      <div className="home-info-grid">
+        <Card title="What is ready now?" status={<Badge variant="success">Phase 0</Badge>}>
+          <div className="compact-list">
+            {readyNowItems.map((item) => (
+              <div className="compact-list-row" key={item}>
+                <span>{item}</span>
+                <StatusPill variant="ready">Ready</StatusPill>
+              </div>
+            ))}
+          </div>
+        </Card>
+        <Card title="Coming next" status={<Badge variant="warning">Roadmap</Badge>}>
+          <div className="compact-list">
+            {comingNextItems.map((item) => (
+              <div className="compact-list-row" key={item}>
+                <span>{item}</span>
+                <StatusPill variant="locked">Not implemented</StatusPill>
+              </div>
+            ))}
+          </div>
+        </Card>
       </div>
     </section>
   );
+}
+
+function SnapshotItem({
+  label,
+  status,
+  tone
+}: {
+  label: string;
+  status: string;
+  tone: "ready" | "warning" | "info";
+}) {
+  return (
+    <div className="snapshot-item">
+      <span>{label}</span>
+      <StatusPill variant={tone}>{status}</StatusPill>
+    </div>
+  );
+}
+
+function navigateToRoute(routeId: RouteId) {
+  window.location.hash = routes[routeId].path;
 }

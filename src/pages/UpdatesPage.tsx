@@ -192,8 +192,8 @@ export function UpdatesPage() {
     <section className="page">
       <div className="page-heading">
         <div>
-          <p className="eyebrow">Updates</p>
-          <h2>Offline Update Shell</h2>
+          <p className="eyebrow">System</p>
+          <h2>Offline Updates</h2>
           <p>
             Phase 0 can inspect and stage offline update metadata only. It does
             not install updates.

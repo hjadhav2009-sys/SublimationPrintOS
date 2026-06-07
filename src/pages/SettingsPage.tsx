@@ -43,13 +43,13 @@ const languageOptions: Array<{
 ];
 
 const startupPageOptions: Array<{ value: RouteId; label: string }> = [
-  { value: "dashboard", label: "Dashboard" },
+  { value: "dashboard", label: "Home" },
   { value: "settings", label: "Settings" },
-  { value: "health", label: "Health Check" },
-  { value: "upscale", label: "Upscale Test" },
-  { value: "logs", label: "Logs" },
-  { value: "updates", label: "Updates" },
-  { value: "shortcuts", label: "Shortcuts" }
+  { value: "health", label: "System Health" },
+  { value: "upscale", label: "Upscale Factory" },
+  { value: "logs", label: "Logs & Diagnostics" },
+  { value: "updates", label: "Offline Updates" },
+  { value: "shortcuts", label: "Keyboard Shortcuts" }
 ];
 
 const unitOptions: Array<{
@@ -357,7 +357,7 @@ export function SettingsPage() {
       <div className="page-heading">
         <div>
           <p className="eyebrow">Settings</p>
-          <h2>Local settings persistence</h2>
+          <h2>Local preferences saved in SQLite.</h2>
           <p>
             Phase 0 settings are stored locally in SQLite. These controls only
             manage foundation defaults and do not activate production workflows.

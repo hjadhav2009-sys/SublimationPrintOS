@@ -3,9 +3,9 @@ import type { ShortcutDefinition } from "../types/app";
 export const shortcutDefinitions: ShortcutDefinition[] = [
   {
     id: "shortcut-dashboard",
-    label: "Dashboard",
+    label: "Home",
     keys: ["Ctrl", "Shift", "D"],
-    description: "Navigate to Dashboard",
+    description: "Navigate to Home",
     action: "dashboard",
     phase: "Phase 0"
   },
@@ -19,25 +19,25 @@ export const shortcutDefinitions: ShortcutDefinition[] = [
   },
   {
     id: "shortcut-health",
-    label: "Health Check",
+    label: "System Health",
     keys: ["Ctrl", "Shift", "H"],
-    description: "Navigate to Health Check",
+    description: "Navigate to System Health",
     action: "health",
     phase: "Phase 0"
   },
   {
     id: "shortcut-logs",
-    label: "Logs",
+    label: "Logs & Diagnostics",
     keys: ["Ctrl", "Shift", "L"],
-    description: "Navigate to Logs",
+    description: "Navigate to Logs & Diagnostics",
     action: "logs",
     phase: "Phase 0"
   },
   {
     id: "shortcut-upscale",
-    label: "Upscale Test",
+    label: "Upscale Factory",
     keys: ["Ctrl", "Shift", "U"],
-    description: "Navigate to Real-ESRGAN Engine Test",
+    description: "Navigate to Upscale Factory foundation",
     action: "upscale",
     phase: "Phase 0"
   },
@@ -59,9 +59,9 @@ export const shortcutDefinitions: ShortcutDefinition[] = [
   },
   {
     id: "shortcut-refresh-health",
-    label: "Run Health Check",
+    label: "Run Advanced Health Check",
     keys: ["Ctrl", "Shift", "F"],
-    description: "Navigate to Health Check and run the advanced report",
+    description: "Navigate to System Health and run the advanced report",
     action: "refresh_health_check",
     phase: "Phase 0"
   }

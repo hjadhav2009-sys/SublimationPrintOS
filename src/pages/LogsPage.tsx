@@ -208,7 +208,7 @@ export function LogsPage() {
     <section className="page">
       <div className="page-heading">
         <div>
-          <p className="eyebrow">Logs</p>
+          <p className="eyebrow">System</p>
           <h2>Logs & Diagnostics</h2>
           <p>
             Local-only Phase 0 logs. No user images or design files are

@@ -33,8 +33,8 @@ export function ShortcutsPage() {
     <section className="page">
       <div className="page-heading">
         <div>
-          <p className="eyebrow">Shortcuts</p>
-          <h2>Keyboard shortcuts framework</h2>
+          <p className="eyebrow">Help</p>
+          <h2>Keyboard Shortcuts</h2>
           <p>
             Phase 0 app-window shortcuts are enabled. Shortcut customization
             will come later.

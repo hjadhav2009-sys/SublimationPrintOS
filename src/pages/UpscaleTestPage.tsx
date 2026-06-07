@@ -123,11 +123,11 @@ export function UpscaleTestPage() {
     <section className="page">
       <div className="page-heading">
         <div>
-          <p className="eyebrow">Upscale Test</p>
-          <h2>Real-ESRGAN Engine Test</h2>
+          <p className="eyebrow">Upscale Factory</p>
+          <h2>Upscale Factory Foundation</h2>
           <p>
-            This is only Phase 0 engine discovery and safe test-run. Full
-            Upscale Factory comes later.
+            Phase 0 only checks Real-ESRGAN engine discovery and safe test-run.
+            Full batch upscaling comes in Phase 1.
           </p>
         </div>
         <Badge variant={discovery?.ok ? "success" : "warning"}>

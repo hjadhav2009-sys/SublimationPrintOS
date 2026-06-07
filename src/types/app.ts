@@ -1,11 +1,15 @@
 export type RouteId =
   | "dashboard"
+  | "designStore"
+  | "designStudio"
+  | "printSheetBuilder"
   | "settings"
   | "health"
   | "upscale"
   | "logs"
   | "updates"
-  | "shortcuts";
+  | "shortcuts"
+  | "alphaChecklist";
 
 export interface RouteDefinition {
   id: RouteId;
@@ -17,6 +21,14 @@ export interface NavigationItem {
   routeId: RouteId;
   label: string;
   description: string;
+  badge?: string;
+  isLocked?: boolean;
+}
+
+export interface NavigationGroup {
+  id: string;
+  label: string;
+  items: NavigationItem[];
 }
 
 export interface PhaseInfo {

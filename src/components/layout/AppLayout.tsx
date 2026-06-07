@@ -19,7 +19,7 @@ export function AppLayout({
     <div className="app-layout">
       <Sidebar currentRoute={currentRoute} onNavigate={onNavigate} />
       <div className="app-shell">
-        <TopBar />
+        <TopBar currentRoute={currentRoute} />
         <main className="app-content">{children}</main>
         <StatusBar />
       </div>

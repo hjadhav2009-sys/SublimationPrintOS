@@ -1,6 +1,6 @@
-import { navigationItems } from "../../app/navigation";
-import { Button } from "../ui/Button";
+import { navigationGroups } from "../../app/navigation";
 import type { RouteId } from "../../types/app";
+import { SidebarGroup } from "./SidebarGroup";
 
 interface SidebarProps {
   currentRoute: RouteId;
@@ -16,23 +16,18 @@ export function Sidebar({ currentRoute, onNavigate }: SidebarProps) {
         </div>
         <div>
           <p className="brand-title">SublimationPrintOS</p>
-          <p className="brand-subtitle">Production shell</p>
+          <p className="brand-subtitle">Production workspace</p>
         </div>
       </div>
 
       <nav className="sidebar-nav">
-        {navigationItems.map((item) => (
-          <Button
-            aria-current={currentRoute === item.routeId ? "page" : undefined}
-            className="nav-button"
-            isActive={currentRoute === item.routeId}
-            key={item.routeId}
-            onClick={() => onNavigate(item.routeId)}
-            variant="ghost"
-          >
-            <span className="nav-label">{item.label}</span>
-            <span className="nav-description">{item.description}</span>
-          </Button>
+        {navigationGroups.map((group) => (
+          <SidebarGroup
+            currentRoute={currentRoute}
+            group={group}
+            key={group.id}
+            onNavigate={onNavigate}
+          />
         ))}
       </nav>
     </aside>

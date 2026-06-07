@@ -6,7 +6,22 @@ export const routes: Record<RouteId, RouteDefinition> = {
   dashboard: {
     id: "dashboard",
     path: "/",
-    title: "Dashboard"
+    title: "Home"
+  },
+  designStore: {
+    id: "designStore",
+    path: "/design-store",
+    title: "Design Store"
+  },
+  designStudio: {
+    id: "designStudio",
+    path: "/design-studio",
+    title: "Design Studio"
+  },
+  printSheetBuilder: {
+    id: "printSheetBuilder",
+    path: "/print-sheet-builder",
+    title: "Print Sheet Builder"
   },
   settings: {
     id: "settings",
@@ -16,27 +31,32 @@ export const routes: Record<RouteId, RouteDefinition> = {
   health: {
     id: "health",
     path: "/health",
-    title: "Health Check"
+    title: "System Health"
   },
   upscale: {
     id: "upscale",
-    path: "/upscale-test",
-    title: "Upscale Test"
+    path: "/upscale-factory",
+    title: "Upscale Factory"
   },
   logs: {
     id: "logs",
     path: "/logs",
-    title: "Logs"
+    title: "Logs & Diagnostics"
   },
   updates: {
     id: "updates",
     path: "/updates",
-    title: "Updates"
+    title: "Offline Updates"
   },
   shortcuts: {
     id: "shortcuts",
     path: "/shortcuts",
-    title: "Shortcuts"
+    title: "Keyboard Shortcuts"
+  },
+  alphaChecklist: {
+    id: "alphaChecklist",
+    path: "/alpha-0-checklist",
+    title: "Alpha 0 Checklist"
   }
 };
 

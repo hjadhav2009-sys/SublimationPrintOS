@@ -18,10 +18,10 @@ use tauri::{Emitter, Manager, WindowEvent};
 fn main() {
     tauri::Builder::default()
         .setup(|app| {
-            let dashboard = MenuItem::with_id(app, "menu_dashboard", "Dashboard", true, None::<&str>)?;
+            let dashboard = MenuItem::with_id(app, "menu_dashboard", "Home", true, None::<&str>)?;
             let settings = MenuItem::with_id(app, "menu_settings", "Settings", true, None::<&str>)?;
-            let health = MenuItem::with_id(app, "menu_health", "Health Check", true, None::<&str>)?;
-            let logs = MenuItem::with_id(app, "menu_logs", "Logs", true, None::<&str>)?;
+            let health = MenuItem::with_id(app, "menu_health", "System Health", true, None::<&str>)?;
+            let logs = MenuItem::with_id(app, "menu_logs", "Logs & Diagnostics", true, None::<&str>)?;
             let recovery_snapshot = MenuItem::with_id(
                 app,
                 "menu_create_recovery_snapshot",
@@ -30,6 +30,8 @@ fn main() {
                 None::<&str>,
             )?;
             let quit = MenuItem::with_id(app, "menu_quit", "Quit", true, None::<&str>)?;
+            let upscale_factory =
+                MenuItem::with_id(app, "menu_upscale_factory", "Upscale Factory", true, None::<&str>)?;
             let discover_engine = MenuItem::with_id(
                 app,
                 "menu_discover_engine",
@@ -44,9 +46,13 @@ fn main() {
                 true,
                 None::<&str>,
             )?;
-            let open_logs = MenuItem::with_id(app, "menu_open_logs", "Open Logs Page", true, None::<&str>)?;
+            let offline_updates =
+                MenuItem::with_id(app, "menu_offline_updates", "Offline Updates", true, None::<&str>)?;
+            let shortcuts =
+                MenuItem::with_id(app, "menu_shortcuts", "Keyboard Shortcuts", true, None::<&str>)?;
+            let alpha_checklist =
+                MenuItem::with_id(app, "menu_alpha_checklist", "Alpha 0 Checklist", true, None::<&str>)?;
             let about = MenuItem::with_id(app, "menu_about", "About SublimationPrintOS", true, None::<&str>)?;
-            let phase_status = MenuItem::with_id(app, "menu_phase_status", "Phase 0 Status", true, None::<&str>)?;
 
             let file_menu = Submenu::with_items(
                 app,
@@ -67,9 +73,15 @@ fn main() {
                 app,
                 "Tools",
                 true,
-                &[&discover_engine, &advanced_health, &open_logs],
+                &[
+                    &upscale_factory,
+                    &discover_engine,
+                    &advanced_health,
+                    &offline_updates,
+                ],
             )?;
-            let help_menu = Submenu::with_items(app, "Help", true, &[&about, &phase_status])?;
+            let help_menu =
+                Submenu::with_items(app, "Help", true, &[&shortcuts, &alpha_checklist, &about])?;
             let menu = Menu::with_items(app, &[&file_menu, &tools_menu, &help_menu])?;
             app.set_menu(menu)?;
             Ok(())
@@ -80,11 +92,14 @@ fn main() {
                 "menu_dashboard" => emit_menu_event(app, "dashboard"),
                 "menu_settings" => emit_menu_event(app, "settings"),
                 "menu_health" => emit_menu_event(app, "health"),
-                "menu_logs" | "menu_open_logs" => emit_menu_event(app, "logs"),
+                "menu_logs" => emit_menu_event(app, "logs"),
+                "menu_upscale_factory" => emit_menu_event(app, "upscale"),
                 "menu_discover_engine" => emit_menu_event(app, "discover_engine"),
                 "menu_run_advanced_health" => emit_menu_event(app, "run_advanced_health"),
+                "menu_offline_updates" => emit_menu_event(app, "updates"),
+                "menu_shortcuts" => emit_menu_event(app, "shortcuts"),
+                "menu_alpha_checklist" => emit_menu_event(app, "alphaChecklist"),
                 "menu_about" => emit_menu_event(app, "about"),
-                "menu_phase_status" => emit_menu_event(app, "phase_status"),
                 "menu_create_recovery_snapshot" => {
                     emit_menu_event(app, "create_recovery_snapshot");
                 }

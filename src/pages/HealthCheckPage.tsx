@@ -134,8 +134,8 @@ export function HealthCheckPage() {
     <section className="page">
       <div className="page-heading">
         <div>
-          <p className="eyebrow">Health Check</p>
-          <h2>Phase 0 foundation checks</h2>
+          <p className="eyebrow">System</p>
+          <h2>System Health</h2>
           <p>
             AppData and SQLite checks are real Phase 0 foundation checks. GPU
             and Real-ESRGAN diagnostics remain placeholders for later prompts.
