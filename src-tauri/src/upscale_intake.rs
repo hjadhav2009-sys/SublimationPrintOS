@@ -5,6 +5,7 @@ use chrono::Utc;
 use rusqlite::{params, Connection, OptionalExtension};
 use serde::Serialize;
 use std::fs;
+use std::io::ErrorKind;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -282,8 +283,7 @@ fn import_candidate_paths(
         }),
     )?;
 
-    fs::create_dir_all(raw_assets_dir(paths))
-        .map_err(|error| format!("Unable to create raw assets directory: {error}"))?;
+    let raw_root_dir = ensure_raw_assets_root(paths)?;
 
     let connection = open_upscale_connection(paths)?;
     let defaults = queue_defaults(paths);
@@ -298,7 +298,14 @@ fn import_candidate_paths(
     let mut items = Vec::new();
 
     for candidate_path in candidate_paths {
-        let item = process_candidate_path(paths, &connection, &defaults, &candidate_path, source_kind);
+        let item = process_candidate_path(
+            paths,
+            &connection,
+            &defaults,
+            &raw_root_dir,
+            &candidate_path,
+            source_kind,
+        );
         match item.status.as_str() {
             "queued" => {
                 summary.queued += 1;
@@ -349,6 +356,7 @@ fn process_candidate_path(
     paths: &AppPaths,
     connection: &Connection,
     defaults: &QueueDefaults,
+    raw_root_dir: &Path,
     source_path: &Path,
     source_kind: &str,
 ) -> ImageImportItemResult {
@@ -437,14 +445,36 @@ fn process_candidate_path(
     let now = Utc::now();
     let day = now.format("%Y%m%d").to_string();
     let relative_path = format!("assets/raw/{day}/{sha256}.{extension}");
-    let destination_dir = paths.app_data_dir.join("assets").join("raw").join(&day);
+    let destination_dir = raw_root_dir.join(&day);
     let destination_path = destination_dir.join(format!("{sha256}.{extension}"));
 
     let (file_asset_id, inserted_asset) = match find_existing_asset(connection, &sha256) {
         Ok(Some(asset)) => {
-            let asset_path = paths.app_data_dir.join(platform_relative_path(&asset.relative_path));
+            let asset_path = match resolve_raw_relative_path(
+                paths,
+                raw_root_dir,
+                &asset.relative_path,
+                "Existing raw image asset path",
+            ) {
+                Ok(path) => path,
+                Err(error) => {
+                    return item_result(
+                        original_name,
+                        source_path_preview,
+                        "error",
+                        Some(asset.id),
+                        None,
+                        &error,
+                    );
+                }
+            };
             if !asset_path.exists() {
-                if let Err(error) = copy_raw_asset(source_path, &destination_dir, &destination_path) {
+                if let Err(error) = copy_raw_asset(
+                    source_path,
+                    raw_root_dir,
+                    &destination_dir,
+                    &destination_path,
+                ) {
                     return item_result(
                         original_name,
                         source_path_preview,
@@ -466,11 +496,24 @@ fn process_candidate_path(
                         &error,
                     );
                 }
+            } else if let Err(error) =
+                ensure_regular_file_metadata(&asset_path, "Existing raw image asset")
+            {
+                return item_result(
+                    original_name,
+                    source_path_preview,
+                    "error",
+                    Some(asset.id),
+                    None,
+                    &error,
+                );
             }
             (asset.id, false)
         }
         Ok(None) => {
-            if let Err(error) = copy_raw_asset(source_path, &destination_dir, &destination_path) {
+            if let Err(error) =
+                copy_raw_asset(source_path, raw_root_dir, &destination_dir, &destination_path)
+            {
                 return item_result(
                     original_name,
                     source_path_preview,
@@ -893,42 +936,53 @@ fn insert_queue_item(
     Ok(id)
 }
 
-fn copy_raw_asset(source_path: &Path, destination_dir: &Path, destination_path: &Path) -> Result<(), String> {
-    fs::create_dir_all(destination_dir).map_err(|error| {
-        format!(
-            "Unable to create raw image day folder {}: {error}",
-            path_to_string(destination_dir)
-        )
-    })?;
+fn copy_raw_asset(
+    source_path: &Path,
+    raw_root_dir: &Path,
+    destination_dir: &Path,
+    destination_path: &Path,
+) -> Result<(), String> {
+    ensure_regular_file_metadata(source_path, "Source image")?;
+    ensure_child_path_inside_parent_for_creation(
+        raw_root_dir,
+        destination_dir,
+        "Raw image day folder",
+    )?;
+    ensure_directory_exists_without_symlink(destination_dir, "Raw image day folder")?;
+    ensure_existing_path_inside(raw_root_dir, destination_dir, "Raw image day folder")?;
+    ensure_child_path_inside_parent_for_creation(
+        destination_dir,
+        destination_path,
+        "Raw image destination file",
+    )?;
 
     if destination_path.exists() {
-        let metadata = fs::symlink_metadata(destination_path).map_err(|error| {
-            format!(
-                "Unable to inspect existing raw image {}: {error}",
-                path_to_string(destination_path)
-            )
-        })?;
-        if metadata.file_type().is_symlink() {
-            return Err("Existing raw image path is a symlink and was blocked".to_string());
-        }
-        if !metadata.is_file() {
-            return Err("Existing raw image path is not a regular file".to_string());
-        }
+        ensure_existing_path_inside(
+            destination_dir,
+            destination_path,
+            "Existing raw image file",
+        )?;
+        ensure_regular_file_metadata(destination_path, "Existing raw image file")?;
         return Ok(());
     }
 
-    let temp_path = destination_dir.join(format!(
-        ".{}.tmp",
-        new_local_id("copy")
-    ));
+    let temp_path = unique_temp_path(destination_dir)?;
+    ensure_child_path_inside_parent_for_creation(
+        destination_dir,
+        &temp_path,
+        "Temporary raw image copy",
+    )?;
 
     fs::copy(source_path, &temp_path).map_err(|error| {
-        let _ = fs::remove_file(&temp_path);
+        let _ = remove_temp_file_if_safe(destination_dir, &temp_path);
         format!("Unable to copy raw image into AppData: {error}")
     })?;
 
+    ensure_existing_path_inside(destination_dir, &temp_path, "Temporary raw image copy")?;
+    ensure_regular_file_metadata(&temp_path, "Temporary raw image copy")?;
+
     fs::rename(&temp_path, destination_path).map_err(|error| {
-        let _ = fs::remove_file(&temp_path);
+        let _ = remove_temp_file_if_safe(destination_dir, &temp_path);
         format!("Unable to finalize raw image copy: {error}")
     })
 }
@@ -943,6 +997,194 @@ fn ensure_regular_directory(path: &Path) -> Result<(), String> {
         return Err("Selected folder is not a real directory".to_string());
     }
     Ok(())
+}
+
+fn ensure_raw_assets_root(paths: &AppPaths) -> Result<PathBuf, String> {
+    let assets_dir = paths.app_data_dir.join("assets");
+    let raw_root_dir = assets_dir.join("raw");
+
+    ensure_directory_exists_without_symlink(&paths.app_data_dir, "AppData folder")?;
+    ensure_child_path_inside_parent_for_creation(
+        &paths.app_data_dir,
+        &assets_dir,
+        "Assets folder",
+    )?;
+    ensure_directory_exists_without_symlink(&assets_dir, "Assets folder")?;
+    ensure_existing_path_inside(&paths.app_data_dir, &assets_dir, "Assets folder")?;
+
+    ensure_child_path_inside_parent_for_creation(
+        &assets_dir,
+        &raw_root_dir,
+        "Raw assets folder",
+    )?;
+    ensure_directory_exists_without_symlink(&raw_root_dir, "Raw assets folder")?;
+    ensure_existing_path_inside(&assets_dir, &raw_root_dir, "Raw assets folder")?;
+
+    Ok(raw_root_dir)
+}
+
+fn ensure_real_directory_metadata(path: &Path, label: &str) -> Result<(), String> {
+    let metadata = fs::symlink_metadata(path)
+        .map_err(|error| format!("{label} could not be inspected: {error}"))?;
+    if metadata.file_type().is_symlink() {
+        return Err(format!("{label} is a symlink and was blocked"));
+    }
+    if !metadata.is_dir() {
+        return Err(format!("{label} is not a real directory"));
+    }
+    Ok(())
+}
+
+fn ensure_regular_file_metadata(path: &Path, label: &str) -> Result<(), String> {
+    let metadata = fs::symlink_metadata(path)
+        .map_err(|error| format!("{label} could not be inspected: {error}"))?;
+    if metadata.file_type().is_symlink() {
+        return Err(format!("{label} is a symlink and was blocked"));
+    }
+    if !metadata.is_file() {
+        return Err(format!("{label} is not a regular file"));
+    }
+    Ok(())
+}
+
+fn ensure_existing_path_inside(parent: &Path, child: &Path, label: &str) -> Result<(), String> {
+    ensure_real_directory_metadata(parent, "Expected parent directory")?;
+    let child_metadata = fs::symlink_metadata(child)
+        .map_err(|error| format!("{label} could not be inspected: {error}"))?;
+    if child_metadata.file_type().is_symlink() {
+        return Err(format!("{label} is a symlink and was blocked"));
+    }
+
+    let parent = parent
+        .canonicalize()
+        .map_err(|error| format!("Expected parent directory could not be resolved: {error}"))?;
+    let child = child
+        .canonicalize()
+        .map_err(|error| format!("{label} could not be resolved: {error}"))?;
+
+    if !child.starts_with(&parent) {
+        return Err(format!("{label} resolved outside its expected folder and was blocked"));
+    }
+
+    Ok(())
+}
+
+fn ensure_child_path_inside_parent_for_creation(
+    parent: &Path,
+    child: &Path,
+    label: &str,
+) -> Result<(), String> {
+    match fs::symlink_metadata(child) {
+        Ok(_) => return ensure_existing_path_inside(parent, child, label),
+        Err(error) if error.kind() != ErrorKind::NotFound => {
+            return Err(format!("{label} could not be inspected: {error}"));
+        }
+        Err(_) => {}
+    }
+
+    ensure_real_directory_metadata(parent, "Expected parent directory")?;
+    let parent_canonical = parent
+        .canonicalize()
+        .map_err(|error| format!("Expected parent directory could not be resolved: {error}"))?;
+    let child_parent = child
+        .parent()
+        .ok_or_else(|| format!("{label} has no parent directory"))?;
+    ensure_real_directory_metadata(child_parent, "Child parent directory")?;
+    let child_parent_canonical = child_parent
+        .canonicalize()
+        .map_err(|error| format!("Child parent directory could not be resolved: {error}"))?;
+
+    if !child_parent_canonical.starts_with(&parent_canonical) {
+        return Err(format!("{label} resolved outside its expected folder and was blocked"));
+    }
+
+    if child.file_name().is_none() {
+        return Err(format!("{label} is not a valid child path"));
+    }
+
+    Ok(())
+}
+
+fn ensure_directory_exists_without_symlink(path: &Path, label: &str) -> Result<(), String> {
+    match fs::symlink_metadata(path) {
+        Ok(_) => ensure_real_directory_metadata(path, label),
+        Err(error) if error.kind() == ErrorKind::NotFound => {
+            fs::create_dir(path)
+                .map_err(|error| format!("Unable to create {label}: {error}"))?;
+            ensure_real_directory_metadata(path, label)
+        }
+        Err(error) => Err(format!("{label} could not be inspected: {error}")),
+    }
+}
+
+fn resolve_raw_relative_path(
+    paths: &AppPaths,
+    raw_root_dir: &Path,
+    relative_path: &str,
+    label: &str,
+) -> Result<PathBuf, String> {
+    let relative_path = platform_relative_path(relative_path);
+    let raw_relative_root = PathBuf::from("assets").join("raw");
+    if relative_path.is_absolute()
+        || relative_path
+            .components()
+            .any(|component| {
+                matches!(
+                    component,
+                    std::path::Component::CurDir
+                        | std::path::Component::ParentDir
+                        | std::path::Component::Prefix(_)
+                        | std::path::Component::RootDir
+                )
+            })
+        || !relative_path.starts_with(&raw_relative_root)
+    {
+        return Err(format!("{label} resolved outside raw assets folder and was blocked"));
+    }
+
+    let raw_relative_path = relative_path
+        .strip_prefix(&raw_relative_root)
+        .map_err(|_| format!("{label} resolved outside raw assets folder and was blocked"))?;
+    if raw_relative_path.as_os_str().is_empty() {
+        return Err(format!("{label} resolved outside raw assets folder and was blocked"));
+    }
+
+    let resolved_path = raw_root_dir.join(raw_relative_path);
+    if resolved_path != paths.app_data_dir.join(relative_path) {
+        return Err(format!("{label} resolved outside raw assets folder and was blocked"));
+    }
+
+    match fs::symlink_metadata(&resolved_path) {
+        Ok(_) => ensure_existing_path_inside(raw_root_dir, &resolved_path, label)?,
+        Err(error) if error.kind() == ErrorKind::NotFound => {}
+        Err(error) => return Err(format!("{label} could not be inspected: {error}")),
+    }
+
+    Ok(resolved_path)
+}
+
+fn unique_temp_path(destination_dir: &Path) -> Result<PathBuf, String> {
+    for _ in 0..10 {
+        let temp_path = destination_dir.join(format!(".{}.tmp", new_local_id("copy")));
+        match fs::symlink_metadata(&temp_path) {
+            Ok(_) => continue,
+            Err(error) if error.kind() == ErrorKind::NotFound => return Ok(temp_path),
+            Err(error) => {
+                return Err(format!(
+                    "Temporary raw image copy could not be inspected: {error}"
+                ));
+            }
+        }
+    }
+
+    Err("Unable to allocate a safe temporary raw image copy path".to_string())
+}
+
+fn remove_temp_file_if_safe(destination_dir: &Path, temp_path: &Path) -> Result<(), String> {
+    ensure_existing_path_inside(destination_dir, temp_path, "Temporary raw image copy")?;
+    ensure_regular_file_metadata(temp_path, "Temporary raw image copy")?;
+    fs::remove_file(temp_path)
+        .map_err(|error| format!("Unable to remove temporary raw image copy: {error}"))
 }
 
 fn sha256_file(path: &Path) -> Result<String, String> {
