@@ -240,6 +240,7 @@ export type LogModule =
   | "settings"
   | "health"
   | "diagnostics"
+  | "upscale"
   | "frontend";
 
 export type LogSource =
@@ -403,6 +404,76 @@ export interface EngineExpectedLayout {
   expected_test_input_path: string;
   expected_test_output_path: string;
   instructions: string[];
+}
+
+export type ImageImportItemStatus =
+  | "queued"
+  | "duplicate"
+  | "skipped"
+  | "error";
+
+export interface ImageImportSummary {
+  selected: number;
+  imported: number;
+  queued: number;
+  duplicates: number;
+  skipped: number;
+  errors: number;
+}
+
+export interface ImageImportItemResult {
+  original_name: string;
+  source_path_preview: string;
+  status: ImageImportItemStatus;
+  file_asset_id: string | null;
+  queue_item_id: string | null;
+  message: string;
+}
+
+export interface ImageImportResult {
+  ok: boolean;
+  summary: ImageImportSummary;
+  items: ImageImportItemResult[];
+  message: string;
+}
+
+export interface UpscaleQueueItem {
+  id: string;
+  file_asset_id: string;
+  original_name: string;
+  relative_path: string;
+  asset_type: string;
+  mime_type: string | null;
+  size_bytes: number | null;
+  sha256: string | null;
+  status: "queued" | "removed" | "error";
+  desired_scale_factor: 2 | 4 | 8;
+  desired_output_format: "png" | "jpg" | "tiff" | "webp";
+  source_kind: string;
+  notes: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface UpscaleQueueSummary {
+  queued: number;
+  removed: number;
+  error: number;
+  total: number;
+}
+
+export interface UpscaleQueueResponse {
+  ok: boolean;
+  items: UpscaleQueueItem[];
+  summary: UpscaleQueueSummary;
+  message: string;
+}
+
+export interface UpscaleIntakeSummary {
+  ok: boolean;
+  raw_asset_dir: string;
+  queue: UpscaleQueueSummary;
+  message: string;
 }
 
 export interface UpdateManifest {

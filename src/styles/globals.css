@@ -732,6 +732,108 @@ textarea {
   overflow-x: auto;
 }
 
+.queue-table,
+.import-result-list {
+  display: grid;
+  gap: 8px;
+  overflow-x: auto;
+}
+
+.queue-row {
+  display: grid;
+  grid-template-columns:
+    minmax(190px, 1.2fr)
+    minmax(90px, 0.55fr)
+    minmax(86px, 0.5fr)
+    minmax(88px, 0.5fr)
+    minmax(96px, 0.55fr)
+    minmax(116px, 0.65fr)
+    minmax(180px, 1fr)
+    minmax(100px, 0.6fr);
+  gap: 10px;
+  align-items: center;
+  min-width: 1080px;
+  min-height: 48px;
+  padding: 9px 10px;
+  color: var(--color-muted);
+  background: var(--color-surface-strong);
+  border: 1px solid var(--color-border-soft);
+  border-radius: var(--radius-control);
+}
+
+.queue-row > span,
+.queue-row small {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.queue-row strong {
+  display: block;
+  color: var(--color-text);
+  font-size: 0.92rem;
+}
+
+.queue-row small {
+  display: block;
+  margin-top: 4px;
+  color: var(--color-subtle);
+  font-size: 0.78rem;
+}
+
+.queue-row select {
+  width: 100%;
+  min-height: 34px;
+  padding: 5px 7px;
+  color: var(--color-text);
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-control);
+}
+
+.queue-row-header {
+  min-height: 38px;
+  color: var(--color-subtle);
+  background: transparent;
+  border-color: transparent;
+  font-size: 0.78rem;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.import-result-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 12px;
+  align-items: center;
+  min-height: 54px;
+  padding: 10px 0;
+  color: var(--color-muted);
+  border-bottom: 1px solid var(--color-border-soft);
+}
+
+.import-result-row:last-child {
+  border-bottom: 0;
+}
+
+.import-result-row strong {
+  color: var(--color-text);
+}
+
+.empty-state {
+  min-height: 86px;
+  display: grid;
+  place-items: center;
+  padding: 18px;
+  color: var(--color-muted);
+  background: var(--color-surface-strong);
+  border: 1px dashed var(--color-border);
+  border-radius: var(--radius-control);
+}
+
+.compact-heading {
+  margin-top: 10px;
+}
+
 .logs-row {
   display: grid;
   grid-template-columns:
@@ -970,6 +1072,7 @@ kbd {
   .field-row,
   .kv-row,
   .check-row,
+  .import-result-row,
   .package-row,
   .shortcut-row {
     grid-template-columns: minmax(0, 1fr);
