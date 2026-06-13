@@ -7,6 +7,7 @@ import type {
   UpscaleIntakeSummary,
   UpscaleQueueItem,
   UpscaleQueueResponse,
+  UpscaleQueueStatus,
   UpscaleQueueSummary
 } from "../types/app";
 
@@ -119,8 +120,14 @@ function isOutputFormat(
   return value === "png" || value === "jpg" || value === "tiff" || value === "webp";
 }
 
-function isQueueStatus(value: unknown): value is UpscaleQueueItem["status"] {
-  return value === "queued" || value === "removed" || value === "error";
+function isQueueStatus(value: unknown): value is UpscaleQueueStatus {
+  return (
+    value === "queued" ||
+    value === "processing" ||
+    value === "completed" ||
+    value === "failed" ||
+    value === "removed"
+  );
 }
 
 function isImageImportSummary(value: unknown): value is ImageImportSummary {
@@ -176,8 +183,10 @@ function isUpscaleQueueSummary(value: unknown): value is UpscaleQueueSummary {
 
   return (
     isNumber(value.queued) &&
+    isNumber(value.processing) &&
+    isNumber(value.completed) &&
+    isNumber(value.failed) &&
     isNumber(value.removed) &&
-    isNumber(value.error) &&
     isNumber(value.total)
   );
 }
@@ -201,6 +210,15 @@ function isUpscaleQueueItem(value: unknown): value is UpscaleQueueItem {
     isOutputFormat(value.desired_output_format) &&
     isString(value.source_kind) &&
     isNullableString(value.notes) &&
+    isNullableString(value.output_file_asset_id) &&
+    isNullableString(value.output_relative_path) &&
+    isNullableString(value.processing_started_at) &&
+    isNullableString(value.processing_completed_at) &&
+    isNullableString(value.processing_error) &&
+    isNullableNumber(value.processing_duration_ms) &&
+    isNullableString(value.engine_command_preview) &&
+    isNullableString(value.engine_stdout_preview) &&
+    isNullableString(value.engine_stderr_preview) &&
     isString(value.created_at) &&
     isString(value.updated_at)
   );

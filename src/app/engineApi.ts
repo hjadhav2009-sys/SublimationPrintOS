@@ -87,6 +87,8 @@ function isEngineModelStatus(value: unknown): value is EngineModelStatus {
     isBoolean(value.models_dir_exists) &&
     isString(value.models_dir) &&
     isNumber(value.model_files_count) &&
+    isBoolean(value.has_param_file) &&
+    isBoolean(value.has_bin_file) &&
     Array.isArray(value.sample_files) &&
     value.sample_files.every(isString)
   );

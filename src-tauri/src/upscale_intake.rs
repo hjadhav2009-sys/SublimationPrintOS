@@ -1,12 +1,12 @@
 use crate::app_paths::{path_to_string, AppPaths};
+use crate::file_utils::{mime_type_for_extension, sha256_file};
 use crate::logging::{new_log_entry, write_audit_log_event, write_log_entry};
 use crate::settings::get_app_settings_for_paths;
 use chrono::Utc;
 use rusqlite::{params, Connection, OptionalExtension};
 use serde::Serialize;
-use sha2::{Digest, Sha256};
-use std::fs::{self, File};
-use std::io::{BufReader, ErrorKind, Read};
+use std::fs;
+use std::io::ErrorKind;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -60,6 +60,15 @@ pub struct UpscaleQueueItem {
     pub desired_output_format: String,
     pub source_kind: String,
     pub notes: Option<String>,
+    pub output_file_asset_id: Option<String>,
+    pub output_relative_path: Option<String>,
+    pub processing_started_at: Option<String>,
+    pub processing_completed_at: Option<String>,
+    pub processing_error: Option<String>,
+    pub processing_duration_ms: Option<i64>,
+    pub engine_command_preview: Option<String>,
+    pub engine_stdout_preview: Option<String>,
+    pub engine_stderr_preview: Option<String>,
     pub created_at: String,
     pub updated_at: String,
 }
@@ -67,8 +76,10 @@ pub struct UpscaleQueueItem {
 #[derive(Debug, Clone, Serialize)]
 pub struct UpscaleQueueSummary {
     pub queued: usize,
+    pub processing: usize,
+    pub completed: usize,
+    pub failed: usize,
     pub removed: usize,
-    pub error: usize,
     pub total: usize,
 }
 
@@ -232,7 +243,7 @@ pub fn clear_upscale_queue_for_paths(
             UPDATE upscale_queue_items
             SET status = 'removed',
                 updated_at = ?1
-            WHERE status IN ('queued', 'error')
+            WHERE status IN ('queued', 'failed')
             ",
             params![updated_at],
         )
@@ -429,7 +440,7 @@ fn process_candidate_path(
         );
     }
 
-    let sha256 = match sha256_file(source_path) {
+    let sha256 = match sha256_file(source_path, "Source image") {
         Ok(value) => value,
         Err(error) => {
             return item_result(
@@ -654,6 +665,15 @@ fn get_queue_items(
             q.desired_output_format,
             q.source_kind,
             q.notes,
+            q.output_file_asset_id,
+            q.output_relative_path,
+            q.processing_started_at,
+            q.processing_completed_at,
+            q.processing_error,
+            q.processing_duration_ms,
+            q.engine_command_preview,
+            q.engine_stdout_preview,
+            q.engine_stderr_preview,
             q.created_at,
             q.updated_at
         FROM upscale_queue_items q
@@ -696,6 +716,15 @@ fn get_queue_item_by_id(connection: &Connection, id: &str) -> Result<UpscaleQueu
                 q.desired_output_format,
                 q.source_kind,
                 q.notes,
+                q.output_file_asset_id,
+                q.output_relative_path,
+                q.processing_started_at,
+                q.processing_completed_at,
+                q.processing_error,
+                q.processing_duration_ms,
+                q.engine_command_preview,
+                q.engine_stdout_preview,
+                q.engine_stderr_preview,
                 q.created_at,
                 q.updated_at
             FROM upscale_queue_items q
@@ -711,8 +740,10 @@ fn get_queue_item_by_id(connection: &Connection, id: &str) -> Result<UpscaleQueu
 fn queue_summary(connection: &Connection) -> Result<UpscaleQueueSummary, String> {
     let mut summary = UpscaleQueueSummary {
         queued: 0,
+        processing: 0,
+        completed: 0,
+        failed: 0,
         removed: 0,
-        error: 0,
         total: 0,
     };
     let mut statement = connection
@@ -731,8 +762,10 @@ fn queue_summary(connection: &Connection) -> Result<UpscaleQueueSummary, String>
         summary.total += count;
         match status.as_str() {
             "queued" => summary.queued = count,
+            "processing" => summary.processing = count,
+            "completed" => summary.completed = count,
+            "failed" | "error" => summary.failed += count,
             "removed" => summary.removed = count,
-            "error" => summary.error = count,
             _ => {}
         }
     }
@@ -755,8 +788,17 @@ fn queue_item_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<UpscaleQueue
         desired_output_format: row.get(10)?,
         source_kind: row.get(11)?,
         notes: row.get(12)?,
-        created_at: row.get(13)?,
-        updated_at: row.get(14)?,
+        output_file_asset_id: row.get(13)?,
+        output_relative_path: row.get(14)?,
+        processing_started_at: row.get(15)?,
+        processing_completed_at: row.get(16)?,
+        processing_error: row.get(17)?,
+        processing_duration_ms: row.get(18)?,
+        engine_command_preview: row.get(19)?,
+        engine_stdout_preview: row.get(20)?,
+        engine_stderr_preview: row.get(21)?,
+        created_at: row.get(22)?,
+        updated_at: row.get(23)?,
     })
 }
 
@@ -889,7 +931,7 @@ fn find_active_queue_item(
             "
             SELECT id
             FROM upscale_queue_items
-            WHERE file_asset_id = ?1 AND status = 'queued'
+            WHERE file_asset_id = ?1 AND status != 'removed'
             LIMIT 1
             ",
             params![file_asset_id],
@@ -1188,44 +1230,11 @@ fn remove_temp_file_if_safe(destination_dir: &Path, temp_path: &Path) -> Result<
         .map_err(|error| format!("Unable to remove temporary raw image copy: {error}"))
 }
 
-fn sha256_file(path: &Path) -> Result<String, String> {
-    ensure_regular_file_metadata(path, "Source image")?;
-
-    let file = File::open(path)
-        .map_err(|error| format!("Unable to open selected image for SHA-256 hashing: {error}"))?;
-    let mut reader = BufReader::new(file);
-    let mut hasher = Sha256::new();
-    let mut buffer = [0_u8; 64 * 1024];
-
-    loop {
-        let bytes_read = reader
-            .read(&mut buffer)
-            .map_err(|error| format!("Unable to read selected image for SHA-256 hashing: {error}"))?;
-        if bytes_read == 0 {
-            break;
-        }
-        hasher.update(&buffer[..bytes_read]);
-    }
-
-    Ok(format!("{:x}", hasher.finalize()))
-}
-
 fn supported_extension(path: &Path) -> Option<String> {
     let extension = path.extension()?.to_str()?.to_lowercase();
     SUPPORTED_EXTENSIONS
         .contains(&extension.as_str())
         .then_some(extension)
-}
-
-fn mime_type_for_extension(extension: &str) -> &'static str {
-    match extension {
-        "png" => "image/png",
-        "jpg" | "jpeg" => "image/jpeg",
-        "webp" => "image/webp",
-        "tif" | "tiff" => "image/tiff",
-        "bmp" => "image/bmp",
-        _ => "application/octet-stream",
-    }
 }
 
 fn validate_scale_factor(value: i64) -> Result<(), String> {

@@ -31,6 +31,8 @@ pub struct EngineModelStatus {
     pub models_dir_exists: bool,
     pub models_dir: String,
     pub model_files_count: usize,
+    pub has_param_file: bool,
+    pub has_bin_file: bool,
     pub sample_files: Vec<String>,
 }
 
@@ -337,13 +339,16 @@ pub fn discover_realesrgan_engine_for_paths_internal(
         }
     }
 
-    let ok = binary_exists && models.models_dir_exists && can_run_basic_command;
+    let model_files_ready = models.models_dir_exists && models.has_param_file && models.has_bin_file;
+    let ok = binary_exists && model_files_ready && can_run_basic_command;
     let message = if ok {
         "Real-ESRGAN engine discovered".to_string()
     } else if !binary_exists {
         "Real-ESRGAN binary is missing. Place the ncnn Vulkan binary in the engine directory.".to_string()
     } else if !models.models_dir_exists {
         "Real-ESRGAN models directory is missing.".to_string()
+    } else if !model_files_ready {
+        "Real-ESRGAN model files are missing. Place model files inside the managed models folder.".to_string()
     } else {
         "Real-ESRGAN binary exists but basic help command did not complete successfully.".to_string()
     };
@@ -385,21 +390,42 @@ fn model_status(models_dir: &Path) -> Result<EngineModelStatus, String> {
             models_dir_exists: false,
             models_dir: path_to_string(models_dir),
             model_files_count: 0,
+            has_param_file: false,
+            has_bin_file: false,
             sample_files: Vec::new(),
         });
     }
 
     let mut sample_files = Vec::new();
     let mut model_files_count = 0usize;
+    let mut has_param_file = false;
+    let mut has_bin_file = false;
     for entry in fs::read_dir(models_dir)
         .map_err(|error| format!("Unable to read models directory: {error}"))?
     {
         let entry = entry.map_err(|error| format!("Unable to inspect model file: {error}"))?;
-        if entry.path().is_file() {
-            model_files_count += 1;
-            if sample_files.len() < 8 {
-                sample_files.push(entry.file_name().to_string_lossy().into_owned());
-            }
+        let path = entry.path();
+        let metadata = fs::symlink_metadata(&path)
+            .map_err(|error| format!("Unable to inspect model file metadata: {error}"))?;
+        let file_type = metadata.file_type();
+        if file_type.is_symlink() || !file_type.is_file() {
+            continue;
+        }
+
+        model_files_count += 1;
+        if sample_files.len() < 8 {
+            sample_files.push(entry.file_name().to_string_lossy().into_owned());
+        }
+
+        match path
+            .extension()
+            .and_then(|extension| extension.to_str())
+            .map(|extension| extension.to_lowercase())
+            .as_deref()
+        {
+            Some("param") => has_param_file = true,
+            Some("bin") => has_bin_file = true,
+            _ => {}
         }
     }
 
@@ -407,6 +433,8 @@ fn model_status(models_dir: &Path) -> Result<EngineModelStatus, String> {
         models_dir_exists: true,
         models_dir: path_to_string(models_dir),
         model_files_count,
+        has_param_file,
+        has_bin_file,
         sample_files,
     })
 }

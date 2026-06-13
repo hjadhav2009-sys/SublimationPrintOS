@@ -1,10 +1,10 @@
 # SublimationPrintOS
 
-SublimationPrintOS is an offline Windows desktop production operating system for sublimation businesses. The app is local-first and currently exists as a Phase 0 foundation scaffold only.
+SublimationPrintOS is an offline Windows desktop production operating system for sublimation businesses. The app is local-first and currently has a Phase 0 foundation plus early Phase 1 Upscale Factory foundations.
 
 ## Current Phase
 
-Phase 1 has started with Upscale Factory image intake and queue foundation on top of the Phase 0 local storage, SQLite, settings, logs, diagnostics, crash recovery, controlled folder actions, and offline update shell.
+Phase 1 has started with Upscale Factory image intake, queue, and local Real-ESRGAN processing foundation on top of the Phase 0 local storage, SQLite, settings, logs, diagnostics, crash recovery, controlled folder actions, and offline update shell.
 
 This repository contains the initial desktop app shell. It does not contain production workflow features yet.
 
@@ -38,6 +38,10 @@ This repository contains the initial desktop app shell. It does not contain prod
 - Raw image asset registry in SQLite using the existing `file_assets` table.
 - Upscale queue foundation in SQLite.
 - Per-item queue scale/output setting updates and queue removal without deleting raw assets.
+- Local Real-ESRGAN queue processing foundation.
+- Process selected, next, and all queued upscale items.
+- Upscaled output asset registration in SQLite.
+- Failed upscale item retry and stale processing repair.
 - Advanced health report covering system, storage, database, settings, logs, diagnostics, recovery, updates, engine, and security checks.
 - App-window keyboard shortcut framework.
 - Native app menu foundation and best-effort close/shutdown handling.
@@ -68,12 +72,13 @@ Design Store, Design Studio, and Print Sheet Builder are shown as future product
 
 ## Intentionally Not Implemented Yet
 
-- Real-ESRGAN production image processing.
 - Full Upscale Factory processing.
-- Batch AI upscaling.
 - Before/after preview.
-- Auto quality check.
+- AI quality scoring.
+- Batch optimization.
+- GPU benchmarking.
 - Design Store save/approval.
+- Production export.
 - Web upload or arbitrary-path image intake.
 - Global theme application from the saved theme setting.
 - Full Design Studio autosave.

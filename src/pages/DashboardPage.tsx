@@ -28,7 +28,7 @@ const readyNowItems = [
   "Settings save/reload",
   "Logs and diagnostics",
   "Crash recovery marker",
-  "Upscale image intake and engine setup shell",
+  "Upscale intake, queue, and local processing foundation",
   "Offline update metadata shell",
   "Alpha 0 QA scripts"
 ];
@@ -195,10 +195,10 @@ export function DashboardPage() {
 
       <div className="module-card-grid">
         <ModuleCard
-          buttonLabel="Open Factory"
-          description="Import local images and prepare them for future AI upscaling."
+          buttonLabel="Open Upscale Factory"
+          description="Import local images, queue them, and run local Real-ESRGAN processing when engine is installed."
           phase="Phase 1"
-          status="Intake ready"
+          status="Foundation ready"
           statusVariant="ready"
           title="Open Upscale Factory"
           onAction={() => navigateToRoute("upscale")}
