@@ -1,7 +1,11 @@
 import { invoke } from "@tauri-apps/api/core";
 import type {
+  StartUpscaleProcessingJobResult,
   UpscaleProcessBatchResult,
   UpscaleProcessItemResult,
+  UpscaleProcessingJobState,
+  UpscaleProcessingJobStatus,
+  UpscaleProcessingPlanInput,
   UpscaleProcessingStatus,
   UpscaleQueueAssetHealth,
   UpscaleQueueAssetHealthItem,
@@ -15,6 +19,34 @@ export async function processUpscaleQueueItem(
   return invokeChecked("process_upscale_queue_item", isUpscaleProcessItemResult, {
     queueItemId
   });
+}
+
+export async function startUpscaleProcessingJob(
+  queueItemId: string,
+  plan: UpscaleProcessingPlanInput
+): Promise<StartUpscaleProcessingJobResult> {
+  return invokeChecked(
+    "start_upscale_processing_job",
+    isStartUpscaleProcessingJobResult,
+    { queueItemId, plan }
+  );
+}
+
+export async function getUpscaleProcessingJob(
+  jobId: string
+): Promise<UpscaleProcessingJobStatus> {
+  return invokeChecked(
+    "get_upscale_processing_job",
+    isUpscaleProcessingJobStatus,
+    { jobId }
+  );
+}
+
+export async function getActiveUpscaleProcessingJob(): Promise<UpscaleProcessingJobStatus | null> {
+  return invokeChecked(
+    "get_active_upscale_processing_job",
+    isNullableUpscaleProcessingJobStatus
+  );
 }
 
 export async function processNextUpscaleQueueItem(): Promise<UpscaleProcessBatchResult> {
@@ -124,6 +156,64 @@ function isQueueAssetHealthStatus(
   value: unknown
 ): value is UpscaleQueueAssetHealthStatus {
   return value === "healthy" || value === "missing_raw" || value === "invalid_path";
+}
+
+function isJobState(value: unknown): value is UpscaleProcessingJobState {
+  return (
+    value === "pending" ||
+    value === "running" ||
+    value === "completed" ||
+    value === "failed" ||
+    value === "cancel_requested"
+  );
+}
+
+function isStartUpscaleProcessingJobResult(
+  value: unknown
+): value is StartUpscaleProcessingJobResult {
+  if (!isRecord(value)) {
+    return false;
+  }
+
+  return (
+    isBoolean(value.ok) &&
+    isString(value.job_id) &&
+    isString(value.queue_item_id) &&
+    isString(value.message)
+  );
+}
+
+function isUpscaleProcessingJobStatus(
+  value: unknown
+): value is UpscaleProcessingJobStatus {
+  if (!isRecord(value)) {
+    return false;
+  }
+
+  return (
+    isBoolean(value.ok) &&
+    isString(value.job_id) &&
+    isString(value.queue_item_id) &&
+    isJobState(value.status) &&
+    isString(value.stage) &&
+    isString(value.progress_label) &&
+    isNullableString(value.started_at) &&
+    isNullableString(value.completed_at) &&
+    isNullableString(value.output_relative_path) &&
+    isNullableString(value.error) &&
+    isString(value.stdout_preview) &&
+    isString(value.stderr_preview) &&
+    isString(value.message) &&
+    isString(value.target_label) &&
+    isString(value.quality_mode) &&
+    isString(value.tile_size)
+  );
+}
+
+function isNullableUpscaleProcessingJobStatus(
+  value: unknown
+): value is UpscaleProcessingJobStatus | null {
+  return value === null || isUpscaleProcessingJobStatus(value);
 }
 
 function isUpscaleProcessItemResult(

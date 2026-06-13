@@ -1,7 +1,7 @@
 use chrono::Utc;
 use rusqlite::{params, Connection};
 
-pub const CURRENT_SCHEMA_VERSION: i64 = 3;
+pub const CURRENT_SCHEMA_VERSION: i64 = 4;
 
 pub fn run_migrations(connection: &mut Connection) -> Result<i64, String> {
     ensure_migration_table(connection)?;
@@ -14,6 +14,9 @@ pub fn run_migrations(connection: &mut Connection) -> Result<i64, String> {
     }
     if !migration_applied(connection, 3)? {
         apply_upscale_processing_migration(connection)?;
+    }
+    if !migration_applied(connection, 4)? {
+        apply_upscale_processing_jobs_migration(connection)?;
     }
 
     Ok(CURRENT_SCHEMA_VERSION)
@@ -264,6 +267,76 @@ fn apply_upscale_processing_migration(connection: &mut Connection) -> Result<(),
     transaction
         .commit()
         .map_err(|error| format!("Unable to commit upscale processing migration: {error}"))
+}
+
+fn apply_upscale_processing_jobs_migration(connection: &mut Connection) -> Result<(), String> {
+    let transaction = connection
+        .transaction()
+        .map_err(|error| format!("Unable to start migration transaction: {error}"))?;
+
+    transaction
+        .execute_batch(
+            "
+            CREATE TABLE IF NOT EXISTS upscale_processing_jobs (
+                id TEXT PRIMARY KEY,
+                queue_item_id TEXT NOT NULL,
+                status TEXT NOT NULL,
+                stage TEXT,
+                progress_label TEXT,
+                plan_json TEXT,
+                output_relative_path TEXT,
+                error_message TEXT,
+                stdout_preview TEXT,
+                stderr_preview TEXT,
+                started_at TEXT,
+                completed_at TEXT,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                FOREIGN KEY(queue_item_id) REFERENCES upscale_queue_items(id)
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_upscale_processing_jobs_status
+                ON upscale_processing_jobs(status);
+            CREATE INDEX IF NOT EXISTS idx_upscale_processing_jobs_queue_item_id
+                ON upscale_processing_jobs(queue_item_id);
+            CREATE INDEX IF NOT EXISTS idx_upscale_processing_jobs_updated_at
+                ON upscale_processing_jobs(updated_at);
+            ",
+        )
+        .map_err(|error| format!("Unable to apply upscale processing jobs migration schema: {error}"))?;
+
+    let applied_at = Utc::now().to_rfc3339();
+    transaction
+        .execute(
+            "INSERT INTO schema_migrations (version, name, applied_at) VALUES (?1, ?2, ?3)",
+            params![4, "upscale processing jobs", applied_at],
+        )
+        .map_err(|error| format!("Unable to record upscale processing jobs migration: {error}"))?;
+
+    let metadata_json = serde_json::json!({
+        "version": 4,
+        "name": "upscale processing jobs"
+    })
+    .to_string();
+
+    transaction
+        .execute(
+            "
+            INSERT INTO audit_logs (event_type, message, metadata_json, created_at)
+            VALUES (?1, ?2, ?3, ?4)
+            ",
+            params![
+                "migration_applied",
+                "Applied migration 4: upscale processing jobs",
+                metadata_json,
+                Utc::now().to_rfc3339()
+            ],
+        )
+        .map_err(|error| format!("Unable to record migration audit log: {error}"))?;
+
+    transaction
+        .commit()
+        .map_err(|error| format!("Unable to commit upscale processing jobs migration: {error}"))
 }
 
 fn table_column_exists(

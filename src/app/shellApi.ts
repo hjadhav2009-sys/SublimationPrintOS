@@ -49,6 +49,7 @@ function isOpenFolderKey(value: unknown): value is OpenFolderKey {
     value === "recovery" ||
     value === "recovery_snapshots" ||
     value === "engine" ||
+    value === "upscaled" ||
     value === "updates" ||
     value === "updates_downloaded" ||
     value === "updates_staged" ||

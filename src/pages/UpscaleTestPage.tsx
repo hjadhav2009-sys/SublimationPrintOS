@@ -8,14 +8,13 @@ import {
 import { commandErrorMessage } from "../app/foundationApi";
 import { openManagedFolder } from "../app/shellApi";
 import {
+  getActiveUpscaleProcessingJob,
   getUpscaleProcessingStatus,
+  getUpscaleProcessingJob,
   getUpscaleQueueAssetHealth,
-  processAllQueuedUpscaleItems,
-  processNextUpscaleQueueItem,
-  processUpscaleQueueItem,
   repairMissingRawQueueItems,
   repairStaleProcessingItems,
-  retryFailedUpscaleQueueItem
+  startUpscaleProcessingJob
 } from "../app/upscaleProcessingApi";
 import {
   clearUpscaleQueue,
@@ -23,8 +22,7 @@ import {
   getUpscaleQueue,
   importImagesFromFolderDialog,
   importImagesWithDialog,
-  removeUpscaleQueueItem,
-  updateUpscaleQueueItemSettings
+  removeUpscaleQueueItem
 } from "../app/upscaleQueueApi";
 import { Badge } from "../components/ui/Badge";
 import { Button } from "../components/ui/Button";
@@ -36,9 +34,11 @@ import type {
   ImageImportItemResult,
   ImageImportResult,
   UpscaleIntakeSummary,
-  UpscaleProcessBatchResult,
-  UpscaleProcessItemResult,
+  UpscaleProcessingJobStatus,
+  UpscaleProcessingPlanInput,
+  UpscaleProcessingQualityMode,
   UpscaleProcessingStatus,
+  UpscaleProcessingTileSize,
   UpscaleQueueAssetHealth,
   UpscaleQueueAssetHealthItem,
   UpscaleQueueItem,
@@ -47,11 +47,9 @@ import type {
 
 const missingRawMessage =
   "Raw image copy is missing from AppData. Re-import the original image or remove this queue item.";
-const scaleOptions: Array<UpscaleQueueItem["desired_scale_factor"]> = [2, 4, 8];
-const outputFormatOptions: Array<UpscaleQueueItem["desired_output_format"]> = [
+const jobOutputFormatOptions: Array<UpscaleProcessingPlanInput["output_format"]> = [
   "png",
   "jpg",
-  "tiff",
   "webp"
 ];
 
@@ -72,10 +70,6 @@ export function UpscaleTestPage() {
 
   const [processingStatus, setProcessingStatus] =
     useState<UpscaleProcessingStatus | null>(null);
-  const [lastProcessResult, setLastProcessResult] =
-    useState<UpscaleProcessItemResult | null>(null);
-  const [lastBatchResult, setLastBatchResult] =
-    useState<UpscaleProcessBatchResult | null>(null);
   const [isProcessingBusy, setIsProcessingBusy] = useState(false);
   const [processingMessage, setProcessingMessage] = useState<string | null>(
     null
@@ -84,6 +78,9 @@ export function UpscaleTestPage() {
     "success" | "warning"
   >("success");
   const [processingError, setProcessingError] = useState<string | null>(null);
+  const [activeJob, setActiveJob] =
+    useState<UpscaleProcessingJobStatus | null>(null);
+  const [jobBanner, setJobBanner] = useState<string | null>(null);
 
   const [assetHealth, setAssetHealth] =
     useState<UpscaleQueueAssetHealth | null>(null);
@@ -113,7 +110,20 @@ export function UpscaleTestPage() {
 
   useEffect(() => {
     void refreshQueue();
+    void refreshActiveJob();
   }, []);
+
+  useEffect(() => {
+    if (!activeJob || !isActiveJobRunning(activeJob)) {
+      return;
+    }
+
+    const timer = window.setInterval(() => {
+      void pollActiveJob(activeJob.job_id);
+    }, 2000);
+
+    return () => window.clearInterval(timer);
+  }, [activeJob?.job_id, activeJob?.status]);
 
   useEffect(() => {
     const handleDiscoverEvent = () => {
@@ -145,6 +155,29 @@ export function UpscaleTestPage() {
     } catch (error: unknown) {
       setQueueError(commandErrorMessage(error));
       return null;
+    }
+  };
+
+  const refreshActiveJob = async () => {
+    try {
+      const job = await getActiveUpscaleProcessingJob();
+      setActiveJob(job);
+      return job;
+    } catch (error: unknown) {
+      setProcessingError(commandErrorMessage(error));
+      return null;
+    }
+  };
+
+  const pollActiveJob = async (jobId: string) => {
+    try {
+      const job = await getUpscaleProcessingJob(jobId);
+      setActiveJob(job);
+      if (!isActiveJobRunning(job)) {
+        await refreshQueue(job.message);
+      }
+    } catch (error: unknown) {
+      setProcessingError(commandErrorMessage(error));
     }
   };
 
@@ -229,40 +262,6 @@ export function UpscaleTestPage() {
     }
   };
 
-  const handleQueueItemSettingsChange = async (
-    item: UpscaleQueueItem,
-    desiredScaleFactor: UpscaleQueueItem["desired_scale_factor"],
-    desiredOutputFormat: UpscaleQueueItem["desired_output_format"]
-  ) => {
-    setIsQueueBusy(true);
-    setQueueMessage(null);
-    setQueueError(null);
-
-    try {
-      const updated = await updateUpscaleQueueItemSettings(
-        item.id,
-        desiredScaleFactor,
-        desiredOutputFormat
-      );
-      setQueueResponse((current) =>
-        current
-          ? {
-              ...current,
-              items: current.items.map((queueItem) =>
-                queueItem.id === updated.id ? updated : queueItem
-              )
-            }
-          : current
-      );
-      setQueueMessageVariant("success");
-      setQueueMessage("Queue item settings updated");
-    } catch (error: unknown) {
-      setQueueError(commandErrorMessage(error));
-    } finally {
-      setIsQueueBusy(false);
-    }
-  };
-
   const handleCheckQueueFiles = async () => {
     setIsHealthBusy(true);
     setHealthMessage(null);
@@ -305,21 +304,6 @@ export function UpscaleTestPage() {
     }
   };
 
-  const handleProcessFirstReady = async () => {
-    await runBatchProcessing(() => processNextUpscaleQueueItem());
-  };
-
-  const handleProcessAllReady = async () => {
-    const confirmed = window.confirm(
-      "Process up to 20 ready images now? This may take time."
-    );
-    if (!confirmed) {
-      return;
-    }
-
-    await runBatchProcessing(() => processAllQueuedUpscaleItems(20));
-  };
-
   const handleRepairStaleProcessing = async () => {
     const confirmed = window.confirm(
       "Mark interrupted processing items as failed?"
@@ -345,28 +329,29 @@ export function UpscaleTestPage() {
     }
   };
 
-  const handleProcessQueueItem = async (queueItemId: string) => {
-    await runItemProcessing(() => processUpscaleQueueItem(queueItemId));
-  };
-
-  const handleRetryFailedItem = async (queueItemId: string) => {
-    await runItemProcessing(() => retryFailedUpscaleQueueItem(queueItemId));
-  };
-
-  const runItemProcessing = async (
-    action: () => Promise<UpscaleProcessItemResult>
+  const handleStartProcessingJob = async (
+    queueItemId: string,
+    plan: UpscaleProcessingPlanInput
   ) => {
     setIsProcessingBusy(true);
     setProcessingMessage(null);
     setProcessingError(null);
-    setLastBatchResult(null);
+    setJobBanner(null);
 
     try {
-      const result = await action();
-      setLastProcessResult(result);
+      const result = await startUpscaleProcessingJob(queueItemId, plan);
       setProcessingMessageVariant(result.ok ? "success" : "warning");
       setProcessingMessage(result.message);
-      await refreshQueue();
+      if (result.ok) {
+        setJobBanner(result.message);
+        const job = await getUpscaleProcessingJob(result.job_id);
+        setActiveJob(job);
+      } else if (result.job_id) {
+        const job = await getUpscaleProcessingJob(result.job_id);
+        setActiveJob(job);
+      } else {
+        await refreshQueue(result.message);
+      }
     } catch (error: unknown) {
       setProcessingError(commandErrorMessage(error));
     } finally {
@@ -374,24 +359,15 @@ export function UpscaleTestPage() {
     }
   };
 
-  const runBatchProcessing = async (
-    action: () => Promise<UpscaleProcessBatchResult>
-  ) => {
-    setIsProcessingBusy(true);
-    setProcessingMessage(null);
+  const handleOpenUpscaledFolder = async () => {
     setProcessingError(null);
-    setLastProcessResult(null);
 
     try {
-      const result = await action();
-      setLastBatchResult(result);
+      const result = await openManagedFolder("upscaled");
       setProcessingMessageVariant(result.ok ? "success" : "warning");
-      setProcessingMessage(buildBatchNotice(result));
-      await refreshQueue();
+      setProcessingMessage(result.message);
     } catch (error: unknown) {
       setProcessingError(commandErrorMessage(error));
-    } finally {
-      setIsProcessingBusy(false);
     }
   };
 
@@ -652,27 +628,21 @@ export function UpscaleTestPage() {
           </Badge>
         }
       >
+        <p>Completed images are saved in AppData/assets/upscaled/YYYYMMDD.</p>
         <div className="settings-actions worker-primary-actions">
-          <Button
-            disabled={isProcessingBusy || !processingStatus?.queued}
-            onClick={() => void handleProcessFirstReady()}
-            variant="primary"
-          >
-            Process First Ready Image
-          </Button>
-          <Button
-            disabled={isProcessingBusy || !processingStatus?.queued}
-            onClick={() => void handleProcessAllReady()}
-            variant="secondary"
-          >
-            Process All Ready Images
-          </Button>
           <Button
             disabled={isQueueBusy || !queueResponse?.summary.total}
             onClick={() => void handleStartFreshQueue()}
             variant="ghost"
           >
             Start Fresh Queue
+          </Button>
+          <Button
+            disabled={isProcessingBusy}
+            onClick={() => void handleOpenUpscaledFolder()}
+            variant="secondary"
+          >
+            Open Upscaled Folder
           </Button>
         </div>
         <div className="summary-grid">
@@ -701,9 +671,15 @@ export function UpscaleTestPage() {
             {processingMessage}
           </div>
         ) : null}
-        {lastBatchResult ? <BatchResultSummary result={lastBatchResult} /> : null}
-        {lastProcessResult ? (
-          <ProcessResultSummary result={lastProcessResult} />
+        {jobBanner && activeJob && isActiveJobRunning(activeJob) ? (
+          <div className="notice notice-success">{jobBanner}</div>
+        ) : null}
+        {activeJob ? (
+          <ActiveJobCard
+            job={activeJob}
+            imageName={imageNameForJob(activeJob, activeItems)}
+            onOpenUpscaledFolder={handleOpenUpscaledFolder}
+          />
         ) : null}
         <div className="settings-actions secondary-actions">
           <Button
@@ -723,10 +699,9 @@ export function UpscaleTestPage() {
                 health={queueHealthById.get(item.id)}
                 item={item}
                 key={item.id}
-                onProcess={handleProcessQueueItem}
+                onStartProcessing={handleStartProcessingJob}
                 onRemove={handleRemoveQueueItem}
-                onRetry={handleRetryFailedItem}
-                onUpdate={handleQueueItemSettingsChange}
+                processingLocked={Boolean(activeJob && isActiveJobRunning(activeJob))}
               />
             ))}
           </div>
@@ -824,30 +799,99 @@ function ImportResultRow({ item }: { item: ImageImportItemResult }) {
   );
 }
 
+type OutputTargetOption =
+  | "scale_2"
+  | "scale_4"
+  | "scale_8"
+  | "scale_10"
+  | "target_8k"
+  | "custom_long_edge";
+
+function ActiveJobCard({
+  imageName,
+  job,
+  onOpenUpscaledFolder
+}: {
+  imageName: string;
+  job: UpscaleProcessingJobStatus;
+  onOpenUpscaledFolder: () => Promise<void>;
+}) {
+  return (
+    <div className="active-job-card">
+      <div className="queue-card-header">
+        <div className="queue-card-title">
+          <strong>{imageName}</strong>
+          <span>{job.progress_label || job.stage}</span>
+        </div>
+        <Badge variant={job.status === "failed" ? "warning" : "info"}>
+          {job.status}
+        </Badge>
+      </div>
+      <div className="queue-card-meta">
+        <MetaItem label="Target" value={job.target_label} />
+        <MetaItem label="Quality" value={qualityModeLabel(job.quality_mode)} />
+        <MetaItem label="Tile Size" value={job.tile_size} />
+        <MetaItem label="Stage" value={job.stage || "pending"} />
+        <MetaItem label="Elapsed" value={elapsedJobTime(job)} />
+        <MetaItem
+          label="Output"
+          value={job.output_relative_path ?? "Not created yet"}
+        />
+      </div>
+      {job.error ? <div className="notice notice-warning">{job.error}</div> : null}
+      {job.output_relative_path ? (
+        <div className="notice notice-success">
+          Output saved: {job.output_relative_path}
+        </div>
+      ) : null}
+      <div className="queue-card-actions">
+        <Button onClick={() => void onOpenUpscaledFolder()} variant="secondary">
+          Open Upscaled Folder
+        </Button>
+      </div>
+    </div>
+  );
+}
+
 function QueueItemCard({
   disabled,
   health,
   item,
-  onProcess,
   onRemove,
-  onRetry,
-  onUpdate
+  onStartProcessing,
+  processingLocked
 }: {
   disabled: boolean;
   health: UpscaleQueueAssetHealthItem | undefined;
   item: UpscaleQueueItem;
-  onProcess: (queueItemId: string) => Promise<void>;
-  onRemove: (queueItemId: string) => Promise<void>;
-  onRetry: (queueItemId: string) => Promise<void>;
-  onUpdate: (
-    item: UpscaleQueueItem,
-    desiredScaleFactor: UpscaleQueueItem["desired_scale_factor"],
-    desiredOutputFormat: UpscaleQueueItem["desired_output_format"]
+  onStartProcessing: (
+    queueItemId: string,
+    plan: UpscaleProcessingPlanInput
   ) => Promise<void>;
+  onRemove: (queueItemId: string) => Promise<void>;
+  processingLocked: boolean;
 }) {
+  const [targetOption, setTargetOption] =
+    useState<OutputTargetOption>("scale_4");
+  const [customLongEdge, setCustomLongEdge] = useState(7680);
+  const [qualityMode, setQualityMode] =
+    useState<UpscaleProcessingQualityMode>("safe");
+  const [tileSize, setTileSize] =
+    useState<UpscaleProcessingTileSize>("auto");
+  const [jobOutputFormat, setJobOutputFormat] =
+    useState<UpscaleProcessingPlanInput["output_format"]>("png");
   const canProcess = canProcessQueueItem(item);
   const canRemove = item.status === "queued" || item.status === "failed";
   const workerMessage = queueItemWorkerMessage(item, health);
+  const plan = buildProcessingPlanInput(
+    targetOption,
+    customLongEdge,
+    qualityMode,
+    tileSize,
+    jobOutputFormat
+  );
+  const isLargeTarget = matchesLargeTarget(targetOption);
+  const controlsDisabled = disabled || processingLocked;
 
   return (
     <article className="queue-item-card">
@@ -870,41 +914,83 @@ function QueueItemCard({
         />
       </div>
 
-      <div className="queue-card-controls">
+      <div className="queue-card-controls large-output-controls">
         <label className="settings-field">
-          <span>Scale</span>
+          <span>Output Target</span>
           <select
-            disabled={disabled || item.status !== "queued"}
-            value={item.desired_scale_factor}
+            disabled={controlsDisabled || !canProcess}
+            value={targetOption}
             onChange={(event) =>
-              void onUpdate(
-                item,
-                Number(event.currentTarget.value) as UpscaleQueueItem["desired_scale_factor"],
-                item.desired_output_format
+              setTargetOption(event.currentTarget.value as OutputTargetOption)
+            }
+          >
+            <option value="scale_2">2x quick test</option>
+            <option value="scale_4">4x standard</option>
+            <option value="scale_8">8x large</option>
+            <option value="scale_10">10x large</option>
+            <option value="target_8k">8K long edge</option>
+            <option value="custom_long_edge">Custom long edge</option>
+          </select>
+        </label>
+        {targetOption === "custom_long_edge" ? (
+          <label className="settings-field">
+            <span>Long Edge</span>
+            <input
+              disabled={controlsDisabled || !canProcess}
+              min={1000}
+              max={10000}
+              onChange={(event) =>
+                setCustomLongEdge(Number(event.currentTarget.value))
+              }
+              type="number"
+              value={customLongEdge}
+            />
+          </label>
+        ) : null}
+        <label className="settings-field">
+          <span>Quality Mode</span>
+          <select
+            disabled={controlsDisabled || !canProcess}
+            value={qualityMode}
+            onChange={(event) =>
+              setQualityMode(
+                event.currentTarget.value as UpscaleProcessingQualityMode
               )
             }
           >
-            {scaleOptions.map((scale) => (
-              <option key={scale} value={scale}>
-                {scale}x
-              </option>
-            ))}
+            <option value="safe">Safe laptop mode</option>
+            <option value="balanced">Balanced</option>
+            <option value="ultra">Ultra quality</option>
           </select>
         </label>
         <label className="settings-field">
-          <span>Format</span>
+          <span>Tile Size</span>
           <select
-            disabled={disabled || item.status !== "queued"}
-            value={item.desired_output_format}
+            disabled={controlsDisabled || !canProcess}
+            value={tileSize}
             onChange={(event) =>
-              void onUpdate(
-                item,
-                item.desired_scale_factor,
-                event.currentTarget.value as UpscaleQueueItem["desired_output_format"]
+              setTileSize(parseTileSize(event.currentTarget.value))
+            }
+          >
+            <option value="auto">Auto</option>
+            <option value={64}>64</option>
+            <option value={128}>128</option>
+            <option value={256}>256</option>
+            <option value={512}>512</option>
+          </select>
+        </label>
+        <label className="settings-field">
+          <span>Output Format</span>
+          <select
+            disabled={controlsDisabled || !canProcess}
+            value={jobOutputFormat}
+            onChange={(event) =>
+              setJobOutputFormat(
+                event.currentTarget.value as UpscaleProcessingPlanInput["output_format"]
               )
             }
           >
-            {outputFormatOptions.map((format) => (
+            {jobOutputFormatOptions.map((format) => (
               <option key={format} value={format}>
                 {format.toUpperCase()}
               </option>
@@ -912,6 +998,26 @@ function QueueItemCard({
           </select>
         </label>
       </div>
+      <p className="field-note">
+        Safe laptop mode may take longer but prevents crashes on low-spec
+        systems.
+      </p>
+      {isLargeTarget ? (
+        <div className="notice notice-warning">
+          Large output may take several minutes. The app will keep running the
+          job in the background.
+        </div>
+      ) : null}
+      {isLargeTarget && qualityMode === "ultra" ? (
+        <div className="notice notice-warning">
+          Ultra quality uses extra Real-ESRGAN passes and can be slow.
+        </div>
+      ) : null}
+      {plan.output_format === "webp" && plan.mode !== "scale" ? (
+        <div className="notice notice-warning">
+          Exact 8K/custom final resize works with PNG or JPG in Phase 1.
+        </div>
+      ) : null}
 
       {workerMessage ? (
         <div
@@ -927,23 +1033,14 @@ function QueueItemCard({
 
       <div className="queue-card-actions">
         <Button
-          disabled={disabled || !canProcess}
-          onClick={() => void onProcess(item.id)}
+          disabled={controlsDisabled || !canProcess}
+          onClick={() => void onStartProcessing(item.id, plan)}
           variant="primary"
         >
-          Process This Image
+          Start Processing
         </Button>
-        {item.status === "failed" ? (
-          <Button
-            disabled={disabled}
-            onClick={() => void onRetry(item.id)}
-            variant="secondary"
-          >
-            Retry
-          </Button>
-        ) : null}
         <Button
-          disabled={disabled || !canRemove}
+          disabled={disabled || !canRemove || processingLocked}
           onClick={() => void onRemove(item.id)}
           variant="ghost"
         >
@@ -951,60 +1048,6 @@ function QueueItemCard({
         </Button>
       </div>
     </article>
-  );
-}
-
-function BatchResultSummary({ result }: { result: UpscaleProcessBatchResult }) {
-  return (
-    <div className="processing-result">
-      <div className="summary-grid">
-        <SummaryItem label="Attempted" value={result.attempted} />
-        <SummaryItem label="Completed" value={result.completed} />
-        <SummaryItem label="Failed" value={result.failed} />
-      </div>
-      {result.results.length > 0 ? (
-        <div className="compact-list">
-          {result.results.map((item) => (
-            <div className="compact-list-row" key={item.queue_item_id}>
-              <span>{item.queue_item_id}</span>
-              <Badge variant={item.ok ? "success" : "warning"}>
-                {queueStatusLabel(item.status)}
-              </Badge>
-            </div>
-          ))}
-        </div>
-      ) : null}
-    </div>
-  );
-}
-
-function ProcessResultSummary({ result }: { result: UpscaleProcessItemResult }) {
-  return (
-    <div className="processing-result">
-      <div className="kv-list">
-        <div className="kv-row">
-          <span>Status</span>
-          <span>{queueStatusLabel(result.status)}</span>
-        </div>
-        <PathRow
-          label="Output"
-          value={result.output_relative_path ?? "Not created"}
-        />
-        <div className="kv-row">
-          <span>Duration</span>
-          <span>{formatDuration(result.duration_ms)}</span>
-        </div>
-      </div>
-      {result.error ? (
-        <div className="notice notice-warning">{result.error}</div>
-      ) : null}
-      {result.stdout_preview ? (
-        <pre className="preview-box">{result.stdout_preview}</pre>
-      ) : null}
-      {result.stderr_preview ? (
-        <pre className="preview-box">{result.stderr_preview}</pre>
-      ) : null}
-    </div>
   );
 }
 
@@ -1201,26 +1244,138 @@ function queueItemWorkerMessage(
   return null;
 }
 
+function buildProcessingPlanInput(
+  targetOption: OutputTargetOption,
+  customLongEdge: number,
+  qualityMode: UpscaleProcessingQualityMode,
+  tileSize: UpscaleProcessingTileSize,
+  outputFormat: UpscaleProcessingPlanInput["output_format"]
+): UpscaleProcessingPlanInput {
+  if (targetOption === "target_8k") {
+    return {
+      mode: "target_8k",
+      scale: null,
+      target_long_edge_px: null,
+      quality_mode: qualityMode,
+      output_format: outputFormat,
+      tile_size: tileSize
+    };
+  }
+
+  if (targetOption === "custom_long_edge") {
+    return {
+      mode: "target_long_edge",
+      scale: null,
+      target_long_edge_px: customLongEdge,
+      quality_mode: qualityMode,
+      output_format: outputFormat,
+      tile_size: tileSize
+    };
+  }
+
+  return {
+    mode: "scale",
+    scale: scaleForTargetOption(targetOption),
+    target_long_edge_px: null,
+    quality_mode: qualityMode,
+    output_format: outputFormat,
+    tile_size: tileSize
+  };
+}
+
+function scaleForTargetOption(
+  targetOption: OutputTargetOption
+): UpscaleProcessingPlanInput["scale"] {
+  switch (targetOption) {
+    case "scale_2":
+      return 2;
+    case "scale_4":
+      return 4;
+    case "scale_8":
+      return 8;
+    case "scale_10":
+      return 10;
+    default:
+      return null;
+  }
+}
+
+function parseTileSize(value: string): UpscaleProcessingTileSize {
+  if (value === "auto") {
+    return "auto";
+  }
+  const numericValue = Number(value);
+  return numericValue === 64 ||
+    numericValue === 128 ||
+    numericValue === 256 ||
+    numericValue === 512
+    ? numericValue
+    : "auto";
+}
+
+function matchesLargeTarget(targetOption: OutputTargetOption) {
+  return (
+    targetOption === "scale_8" ||
+    targetOption === "scale_10" ||
+    targetOption === "target_8k" ||
+    targetOption === "custom_long_edge"
+  );
+}
+
+function isActiveJobRunning(job: UpscaleProcessingJobStatus) {
+  return (
+    job.status === "pending" ||
+    job.status === "running" ||
+    job.status === "cancel_requested"
+  );
+}
+
+function imageNameForJob(
+  job: UpscaleProcessingJobStatus,
+  items: UpscaleQueueItem[]
+) {
+  return (
+    items.find((item) => item.id === job.queue_item_id)?.original_name ??
+    job.queue_item_id
+  );
+}
+
+function qualityModeLabel(value: string) {
+  switch (value) {
+    case "safe":
+      return "Safe laptop mode";
+    case "balanced":
+      return "Balanced";
+    case "ultra":
+      return "Ultra quality";
+    default:
+      return value;
+  }
+}
+
+function elapsedJobTime(job: UpscaleProcessingJobStatus) {
+  if (!job.started_at) {
+    return "Not started";
+  }
+  const end = job.completed_at ? Date.parse(job.completed_at) : Date.now();
+  const started = Date.parse(job.started_at);
+  if (!Number.isFinite(started) || !Number.isFinite(end) || end < started) {
+    return "Not available";
+  }
+  const seconds = Math.floor((end - started) / 1000);
+  if (seconds < 60) {
+    return `${seconds}s`;
+  }
+  const minutes = Math.floor(seconds / 60);
+  const remainder = seconds % 60;
+  return `${minutes}m ${remainder}s`;
+}
+
 function buildImportNotice(
   result: ImageImportResult,
   queue: UpscaleQueueResponse
 ) {
   return `Last import selected ${result.summary.selected} file(s). ${result.summary.queued} queued. Current queue has ${queue.items.length} active item(s).`;
-}
-
-function buildBatchNotice(result: UpscaleProcessBatchResult) {
-  const summary = `Batch summary: ${result.attempted} attempted, ${result.completed} completed, ${result.failed} failed.`;
-
-  if (
-    result.message === "No ready images in queue." ||
-    result.message === "Engine is not ready. Queue items were not changed." ||
-    result.message.startsWith("Processed ") ||
-    result.message.startsWith("Batch summary:")
-  ) {
-    return result.message;
-  }
-
-  return `${result.message} ${summary}`;
 }
 
 function importNoticeVariant(result: ImageImportResult) {
@@ -1235,16 +1390,4 @@ function formatSize(sizeBytes: number | null) {
   }
 
   return `${(sizeBytes / (1024 * 1024)).toFixed(2)} MB`;
-}
-
-function formatDuration(durationMs: number | null) {
-  if (durationMs === null) {
-    return "Not available";
-  }
-
-  if (durationMs < 1000) {
-    return `${durationMs} ms`;
-  }
-
-  return `${(durationMs / 1000).toFixed(1)} s`;
 }

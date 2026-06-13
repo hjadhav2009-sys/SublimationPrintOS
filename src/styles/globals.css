@@ -827,6 +827,17 @@ textarea {
   border-radius: var(--radius-control);
 }
 
+.active-job-card {
+  display: grid;
+  gap: 12px;
+  min-width: 0;
+  padding: 14px;
+  color: var(--color-muted);
+  background: rgba(107, 183, 214, 0.08);
+  border: 1px solid rgba(107, 183, 214, 0.32);
+  border-radius: var(--radius-control);
+}
+
 .queue-card-header {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
@@ -850,6 +861,10 @@ textarea {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
   gap: 10px;
+}
+
+.large-output-controls {
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
 }
 
 .meta-item {
