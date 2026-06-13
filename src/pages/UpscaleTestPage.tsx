@@ -48,6 +48,9 @@ export function UpscaleTestPage() {
   );
   const [isQueueBusy, setIsQueueBusy] = useState(false);
   const [queueMessage, setQueueMessage] = useState<string | null>(null);
+  const [queueMessageVariant, setQueueMessageVariant] = useState<
+    "success" | "warning"
+  >("success");
   const [queueError, setQueueError] = useState<string | null>(null);
 
   const [discovery, setDiscovery] = useState<EngineDiscoveryStatus | null>(null);
@@ -83,9 +86,12 @@ export function UpscaleTestPage() {
       ]);
       setQueueResponse(queue);
       setIntakeSummary(summary);
+      setQueueMessageVariant("success");
       setQueueMessage(messageOverride ?? queue.message);
+      return queue;
     } catch (error: unknown) {
       setQueueError(commandErrorMessage(error));
+      return null;
     }
   };
 
@@ -97,7 +103,11 @@ export function UpscaleTestPage() {
     try {
       const result = await importImagesWithDialog();
       setImportResult(result);
-      await refreshQueue(result.message);
+      const queue = await refreshQueue();
+      if (queue) {
+        setQueueMessageVariant(importNoticeVariant(result));
+        setQueueMessage(buildImportNotice(result, queue));
+      }
     } catch (error: unknown) {
       setQueueError(commandErrorMessage(error));
     } finally {
@@ -113,7 +123,11 @@ export function UpscaleTestPage() {
     try {
       const result = await importImagesFromFolderDialog();
       setImportResult(result);
-      await refreshQueue(result.message);
+      const queue = await refreshQueue();
+      if (queue) {
+        setQueueMessageVariant(importNoticeVariant(result));
+        setQueueMessage(buildImportNotice(result, queue));
+      }
     } catch (error: unknown) {
       setQueueError(commandErrorMessage(error));
     } finally {
@@ -297,7 +311,15 @@ export function UpscaleTestPage() {
         <div className="notice notice-warning">{queueError}</div>
       ) : null}
       {queueMessage ? (
-        <div className="notice notice-success">{queueMessage}</div>
+        <div
+          className={`notice ${
+            queueMessageVariant === "warning"
+              ? "notice-warning"
+              : "notice-success"
+          }`}
+        >
+          {queueMessage}
+        </div>
       ) : null}
 
       <Card
@@ -343,7 +365,8 @@ export function UpscaleTestPage() {
       {importResult ? <ImportResultCard result={importResult} /> : null}
 
       <Card
-        title="Queue Summary"
+        className="queue-summary-card"
+        title="Current Queue Summary"
         status={
           <Badge variant={queueResponse?.summary.queued ? "success" : "info"}>
             {queueResponse?.summary.queued
@@ -352,6 +375,10 @@ export function UpscaleTestPage() {
           </Badge>
         }
       >
+        <p>
+          This is the total current queue. It does not reset when you import
+          another file.
+        </p>
         <div className="summary-grid">
           <SummaryItem label="Queued" value={queueResponse?.summary.queued ?? 0} />
           <SummaryItem label="Removed" value={queueResponse?.summary.removed ?? 0} />
@@ -369,34 +396,44 @@ export function UpscaleTestPage() {
       </Card>
 
       <Card
-        title="Upscale Queue"
+        title="Current Upscale Queue"
         status={<Badge variant="warning">Processing not implemented</Badge>}
       >
+        <p>
+          These are the current active queue rows. Last Import Result above only
+          describes the most recent import action.
+        </p>
         {queueResponse && queueResponse.items.length > 0 ? (
-          <div className="queue-table">
-            <div className="queue-row queue-row-header">
-              <span>Image</span>
-              <span>Status</span>
-              <span>Size</span>
-              <span>Scale</span>
-              <span>Format</span>
-              <span>Source</span>
-              <span>Created</span>
-              <span>Action</span>
+          <>
+            <p className="queue-count-label">
+              Showing {queueResponse.items.length} active queued item(s).
+            </p>
+            <div className="queue-table">
+              <div className="queue-row queue-row-header">
+                <span>Image</span>
+                <span>Status</span>
+                <span>Size</span>
+                <span>Scale</span>
+                <span>Format</span>
+                <span>Source</span>
+                <span>Created</span>
+                <span>Action</span>
+              </div>
+              {queueResponse.items.map((item) => (
+                <QueueRow
+                  disabled={isQueueBusy}
+                  item={item}
+                  key={item.id}
+                  onRemove={handleRemoveQueueItem}
+                  onUpdate={handleQueueItemSettingsChange}
+                />
+              ))}
             </div>
-            {queueResponse.items.map((item) => (
-              <QueueRow
-                disabled={isQueueBusy}
-                item={item}
-                key={item.id}
-                onRemove={handleRemoveQueueItem}
-                onUpdate={handleQueueItemSettingsChange}
-              />
-            ))}
-          </div>
+          </>
         ) : (
           <div className="empty-state">
-            No images queued yet. Import local files to start.
+            No active queued images. Imported raw files may still exist in
+            AppData if they were imported earlier.
           </div>
         )}
       </Card>
@@ -585,9 +622,13 @@ export function UpscaleTestPage() {
 function ImportResultCard({ result }: { result: ImageImportResult }) {
   return (
     <Card
-      title="Import Result"
+      title="Last Import Result"
       status={<Badge variant={result.ok ? "success" : "warning"}>{result.message}</Badge>}
     >
+      <p>
+        This shows only the latest import action. Existing queued images remain
+        in the queue below.
+      </p>
       <div className="summary-grid">
         <SummaryItem label="Selected" value={result.summary.selected} />
         <SummaryItem label="Imported" value={result.summary.imported} />
@@ -596,6 +637,12 @@ function ImportResultCard({ result }: { result: ImageImportResult }) {
         <SummaryItem label="Skipped" value={result.summary.skipped} />
         <SummaryItem label="Errors" value={result.summary.errors} />
       </div>
+      {result.summary.duplicates > 0 ? (
+        <div className="notice notice-warning">
+          Duplicate means this image is already in the active queue. No new
+          queue row was created.
+        </div>
+      ) : null}
       {result.items.length > 0 ? (
         <div className="import-result-list">
           {result.items.map((item, index) => (
@@ -736,6 +783,19 @@ function badgeVariantForImportStatus(status: ImageImportItemResult["status"]) {
   }
 
   return "info";
+}
+
+function buildImportNotice(
+  result: ImageImportResult,
+  queue: UpscaleQueueResponse
+) {
+  return `Last import selected ${result.summary.selected} file(s). ${result.summary.queued} queued. Current queue has ${queue.items.length} active item(s).`;
+}
+
+function importNoticeVariant(result: ImageImportResult) {
+  return result.summary.errors > 0 || result.summary.duplicates > 0
+    ? "warning"
+    : "success";
 }
 
 function formatSize(sizeBytes: number | null) {
