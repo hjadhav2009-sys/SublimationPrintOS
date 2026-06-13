@@ -47,10 +47,17 @@ use crate::upscale_intake::{
     UpscaleQueueItem, UpscaleQueueResponse,
 };
 use crate::upscale_processing::{
-    get_upscale_processing_status_for_paths, process_all_queued_upscale_items_for_paths,
-    process_next_upscale_queue_item_for_paths, process_upscale_queue_item_for_paths,
-    repair_stale_processing_items_for_paths, retry_failed_upscale_queue_item_for_paths,
-    UpscaleProcessBatchResult, UpscaleProcessItemResult, UpscaleProcessingStatus,
+    get_active_upscale_processing_job_for_paths,
+    get_upscale_processing_status_for_paths, get_upscale_queue_asset_health_for_paths,
+    get_upscale_processing_job_for_paths,
+    process_all_queued_upscale_items_for_paths, process_next_upscale_queue_item_for_paths,
+    process_upscale_queue_item_for_paths, repair_interrupted_upscale_processing_job_for_paths,
+    repair_missing_raw_queue_items_for_paths, repair_stale_processing_items_for_paths,
+    retry_failed_upscale_queue_item_for_paths,
+    start_upscale_processing_job_for_paths, StartUpscaleProcessingJobResult,
+    UpscaleProcessBatchResult, UpscaleProcessItemResult, UpscaleProcessingJobStatus,
+    UpscaleInterruptedJobRepairResult, UpscaleProcessingPlanInput, UpscaleProcessingStatus,
+    UpscaleQueueAssetHealth,
 };
 use serde::Serialize;
 use serde_json::Value;
@@ -429,6 +436,33 @@ pub fn process_upscale_queue_item(
 }
 
 #[tauri::command]
+pub fn start_upscale_processing_job(
+    app: AppHandle,
+    queue_item_id: String,
+    plan: UpscaleProcessingPlanInput,
+) -> Result<StartUpscaleProcessingJobResult, String> {
+    let (paths, _storage_summary, _schema_version) = ensure_foundation_ready(&app)?;
+    start_upscale_processing_job_for_paths(&paths, queue_item_id, plan)
+}
+
+#[tauri::command]
+pub fn get_upscale_processing_job(
+    app: AppHandle,
+    job_id: String,
+) -> Result<UpscaleProcessingJobStatus, String> {
+    let (paths, _storage_summary, _schema_version) = ensure_foundation_ready(&app)?;
+    get_upscale_processing_job_for_paths(&paths, job_id)
+}
+
+#[tauri::command]
+pub fn get_active_upscale_processing_job(
+    app: AppHandle,
+) -> Result<Option<UpscaleProcessingJobStatus>, String> {
+    let (paths, _storage_summary, _schema_version) = ensure_foundation_ready(&app)?;
+    get_active_upscale_processing_job_for_paths(&paths)
+}
+
+#[tauri::command]
 pub fn process_next_upscale_queue_item(
     app: AppHandle,
 ) -> Result<UpscaleProcessBatchResult, String> {
@@ -458,6 +492,30 @@ pub fn retry_failed_upscale_queue_item(
 pub fn get_upscale_processing_status(app: AppHandle) -> Result<UpscaleProcessingStatus, String> {
     let (paths, _storage_summary, _schema_version) = ensure_foundation_ready(&app)?;
     get_upscale_processing_status_for_paths(&paths)
+}
+
+#[tauri::command]
+pub fn get_upscale_queue_asset_health(app: AppHandle) -> Result<UpscaleQueueAssetHealth, String> {
+    let (paths, _storage_summary, _schema_version) = ensure_foundation_ready(&app)?;
+    get_upscale_queue_asset_health_for_paths(&paths)
+}
+
+#[tauri::command]
+pub fn repair_missing_raw_queue_items(
+    app: AppHandle,
+    confirm: String,
+) -> Result<UpscaleQueueAssetHealth, String> {
+    let (paths, _storage_summary, _schema_version) = ensure_foundation_ready(&app)?;
+    repair_missing_raw_queue_items_for_paths(&paths, confirm)
+}
+
+#[tauri::command]
+pub fn repair_interrupted_upscale_processing_job(
+    app: AppHandle,
+    confirm: String,
+) -> Result<UpscaleInterruptedJobRepairResult, String> {
+    let (paths, _storage_summary, _schema_version) = ensure_foundation_ready(&app)?;
+    repair_interrupted_upscale_processing_job_for_paths(&paths, confirm)
 }
 
 #[tauri::command]

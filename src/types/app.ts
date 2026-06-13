@@ -99,6 +99,7 @@ export type OpenFolderKey =
   | "recovery"
   | "recovery_snapshots"
   | "engine"
+  | "upscaled"
   | "updates"
   | "updates_downloaded"
   | "updates_staged"
@@ -525,6 +526,88 @@ export interface UpscaleProcessingStatus {
   completed: number;
   failed: number;
   removed: number;
+  message: string;
+}
+
+export type UpscaleProcessingPlanMode =
+  | "scale"
+  | "target_long_edge"
+  | "target_8k";
+
+export type UpscaleProcessingQualityMode = "safe" | "balanced" | "ultra";
+
+export type UpscaleProcessingTileSize = "auto" | 64 | 128 | 256 | 512;
+
+export interface UpscaleProcessingPlanInput {
+  mode: UpscaleProcessingPlanMode;
+  scale: 2 | 4 | 8 | 10 | null;
+  target_long_edge_px: number | null;
+  quality_mode: UpscaleProcessingQualityMode;
+  output_format: "png" | "jpg" | "webp";
+  tile_size: UpscaleProcessingTileSize;
+}
+
+export interface StartUpscaleProcessingJobResult {
+  ok: boolean;
+  job_id: string;
+  queue_item_id: string;
+  message: string;
+}
+
+export type UpscaleProcessingJobState =
+  | "pending"
+  | "running"
+  | "completed"
+  | "failed"
+  | "cancel_requested";
+
+export interface UpscaleProcessingJobStatus {
+  ok: boolean;
+  job_id: string;
+  queue_item_id: string;
+  status: UpscaleProcessingJobState;
+  stage: string;
+  progress_label: string;
+  started_at: string | null;
+  completed_at: string | null;
+  output_relative_path: string | null;
+  error: string | null;
+  stdout_preview: string;
+  stderr_preview: string;
+  message: string;
+  target_label: string;
+  quality_mode: string;
+  tile_size: string;
+}
+
+export interface UpscaleInterruptedJobRepairResult {
+  ok: boolean;
+  repaired_jobs: number;
+  repaired_queue_items: number;
+  message: string;
+}
+
+export type UpscaleQueueAssetHealthStatus =
+  | "healthy"
+  | "missing_raw"
+  | "invalid_path";
+
+export interface UpscaleQueueAssetHealthItem {
+  queue_item_id: string;
+  original_name: string;
+  status: UpscaleQueueStatus;
+  relative_path: string;
+  health: UpscaleQueueAssetHealthStatus;
+  message: string;
+}
+
+export interface UpscaleQueueAssetHealth {
+  ok: boolean;
+  checked: number;
+  healthy: number;
+  missing_raw: number;
+  invalid_path: number;
+  items: UpscaleQueueAssetHealthItem[];
   message: string;
 }
 

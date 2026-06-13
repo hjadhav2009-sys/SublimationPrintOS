@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   clearRealEsrganTestOutput,
   discoverRealEsrganEngine,
@@ -8,12 +8,14 @@ import {
 import { commandErrorMessage } from "../app/foundationApi";
 import { openManagedFolder } from "../app/shellApi";
 import {
+  getActiveUpscaleProcessingJob,
   getUpscaleProcessingStatus,
-  processAllQueuedUpscaleItems,
-  processNextUpscaleQueueItem,
-  processUpscaleQueueItem,
+  getUpscaleProcessingJob,
+  getUpscaleQueueAssetHealth,
+  repairInterruptedUpscaleProcessingJob,
+  repairMissingRawQueueItems,
   repairStaleProcessingItems,
-  retryFailedUpscaleQueueItem
+  startUpscaleProcessingJob
 } from "../app/upscaleProcessingApi";
 import {
   clearUpscaleQueue,
@@ -21,8 +23,7 @@ import {
   getUpscaleQueue,
   importImagesFromFolderDialog,
   importImagesWithDialog,
-  removeUpscaleQueueItem,
-  updateUpscaleQueueItemSettings
+  removeUpscaleQueueItem
 } from "../app/upscaleQueueApi";
 import { Badge } from "../components/ui/Badge";
 import { Button } from "../components/ui/Button";
@@ -33,19 +34,23 @@ import type {
   EngineTestRunResult,
   ImageImportItemResult,
   ImageImportResult,
-  UpscaleProcessBatchResult,
-  UpscaleProcessItemResult,
-  UpscaleProcessingStatus,
   UpscaleIntakeSummary,
+  UpscaleProcessingJobStatus,
+  UpscaleProcessingPlanInput,
+  UpscaleProcessingQualityMode,
+  UpscaleProcessingStatus,
+  UpscaleProcessingTileSize,
+  UpscaleQueueAssetHealth,
+  UpscaleQueueAssetHealthItem,
   UpscaleQueueItem,
   UpscaleQueueResponse
 } from "../types/app";
 
-const scaleOptions: Array<UpscaleQueueItem["desired_scale_factor"]> = [2, 4, 8];
-const outputFormatOptions: Array<UpscaleQueueItem["desired_output_format"]> = [
+const missingRawMessage =
+  "Raw image copy is missing from AppData. Re-import the original image or remove this queue item.";
+const jobOutputFormatOptions: Array<UpscaleProcessingPlanInput["output_format"]> = [
   "png",
   "jpg",
-  "tiff",
   "webp"
 ];
 
@@ -63,15 +68,9 @@ export function UpscaleTestPage() {
     "success" | "warning"
   >("success");
   const [queueError, setQueueError] = useState<string | null>(null);
-  const [selectedQueueItemId, setSelectedQueueItemId] = useState<string | null>(
-    null
-  );
+
   const [processingStatus, setProcessingStatus] =
     useState<UpscaleProcessingStatus | null>(null);
-  const [lastProcessResult, setLastProcessResult] =
-    useState<UpscaleProcessItemResult | null>(null);
-  const [lastBatchResult, setLastBatchResult] =
-    useState<UpscaleProcessBatchResult | null>(null);
   const [isProcessingBusy, setIsProcessingBusy] = useState(false);
   const [processingMessage, setProcessingMessage] = useState<string | null>(
     null
@@ -80,6 +79,18 @@ export function UpscaleTestPage() {
     "success" | "warning"
   >("success");
   const [processingError, setProcessingError] = useState<string | null>(null);
+  const [activeJob, setActiveJob] =
+    useState<UpscaleProcessingJobStatus | null>(null);
+  const [jobBanner, setJobBanner] = useState<string | null>(null);
+
+  const [assetHealth, setAssetHealth] =
+    useState<UpscaleQueueAssetHealth | null>(null);
+  const [isHealthBusy, setIsHealthBusy] = useState(false);
+  const [healthMessage, setHealthMessage] = useState<string | null>(null);
+  const [healthMessageVariant, setHealthMessageVariant] = useState<
+    "success" | "warning"
+  >("success");
+  const [healthError, setHealthError] = useState<string | null>(null);
 
   const [discovery, setDiscovery] = useState<EngineDiscoveryStatus | null>(null);
   const [layout, setLayout] = useState<EngineExpectedLayout | null>(null);
@@ -90,22 +101,30 @@ export function UpscaleTestPage() {
     null
   );
 
+  const queueHealthById = useMemo(() => {
+    const healthMap = new Map<string, UpscaleQueueAssetHealthItem>();
+    for (const item of assetHealth?.items ?? []) {
+      healthMap.set(item.queue_item_id, item);
+    }
+    return healthMap;
+  }, [assetHealth]);
+
   useEffect(() => {
     void refreshQueue();
+    void refreshActiveJob();
   }, []);
 
   useEffect(() => {
-    if (!selectedQueueItemId || !queueResponse) {
+    if (!activeJob || !isActiveJobRunning(activeJob)) {
       return;
     }
 
-    const selectedStillProcessable = queueResponse.items.some(
-      (item) => item.id === selectedQueueItemId && canProcessQueueItem(item)
-    );
-    if (!selectedStillProcessable) {
-      setSelectedQueueItemId(null);
-    }
-  }, [queueResponse, selectedQueueItemId]);
+    const timer = window.setInterval(() => {
+      void pollActiveJob(activeJob.job_id);
+    }, 2000);
+
+    return () => window.clearInterval(timer);
+  }, [activeJob?.job_id, activeJob?.status]);
 
   useEffect(() => {
     const handleDiscoverEvent = () => {
@@ -121,20 +140,45 @@ export function UpscaleTestPage() {
     setQueueError(null);
 
     try {
-      const [queue, summary] = await Promise.all([
+      const [queue, summary, status, health] = await Promise.all([
         getUpscaleQueue(false),
-        getUpscaleIntakeSummary()
+        getUpscaleIntakeSummary(),
+        getUpscaleProcessingStatus(),
+        getUpscaleQueueAssetHealth()
       ]);
-      const status = await getUpscaleProcessingStatus();
       setQueueResponse(queue);
       setIntakeSummary(summary);
       setProcessingStatus(status);
+      setAssetHealth(health);
       setQueueMessageVariant("success");
       setQueueMessage(messageOverride ?? queue.message);
       return queue;
     } catch (error: unknown) {
       setQueueError(commandErrorMessage(error));
       return null;
+    }
+  };
+
+  const refreshActiveJob = async () => {
+    try {
+      const job = await getActiveUpscaleProcessingJob();
+      setActiveJob(job);
+      return job;
+    } catch (error: unknown) {
+      setProcessingError(commandErrorMessage(error));
+      return null;
+    }
+  };
+
+  const pollActiveJob = async (jobId: string) => {
+    try {
+      const job = await getUpscaleProcessingJob(jobId);
+      setActiveJob(job);
+      if (!isActiveJobRunning(job)) {
+        await refreshQueue(job.message);
+      }
+    } catch (error: unknown) {
+      setProcessingError(commandErrorMessage(error));
     }
   };
 
@@ -178,9 +222,9 @@ export function UpscaleTestPage() {
     }
   };
 
-  const handleClearQueue = async () => {
+  const handleStartFreshQueue = async () => {
     const confirmed = window.confirm(
-      "Clear the upscale queue? Raw files will remain in AppData."
+      "Start fresh? This hides current queued/failed rows but does not delete raw image files or outputs."
     );
     if (!confirmed) {
       return;
@@ -193,7 +237,9 @@ export function UpscaleTestPage() {
     try {
       const queue = await clearUpscaleQueue();
       setQueueResponse(queue);
-      await refreshQueue("Upscale queue cleared. Raw files remain in AppData.");
+      await refreshQueue(
+        "Fresh queue started. Current queued and failed rows are hidden; files were not deleted."
+      );
     } catch (error: unknown) {
       setQueueError(commandErrorMessage(error));
     } finally {
@@ -209,7 +255,7 @@ export function UpscaleTestPage() {
     try {
       const queue = await removeUpscaleQueueItem(queueItemId);
       setQueueResponse(queue);
-      await refreshQueue("Queue item removed. Raw image was not deleted.");
+      await refreshQueue("Queue item removed. Files were not deleted.");
     } catch (error: unknown) {
       setQueueError(commandErrorMessage(error));
     } finally {
@@ -217,65 +263,46 @@ export function UpscaleTestPage() {
     }
   };
 
-  const handleQueueItemSettingsChange = async (
-    item: UpscaleQueueItem,
-    desiredScaleFactor: UpscaleQueueItem["desired_scale_factor"],
-    desiredOutputFormat: UpscaleQueueItem["desired_output_format"]
-  ) => {
-    setIsQueueBusy(true);
-    setQueueMessage(null);
-    setQueueError(null);
+  const handleCheckQueueFiles = async () => {
+    setIsHealthBusy(true);
+    setHealthMessage(null);
+    setHealthError(null);
 
     try {
-      const updated = await updateUpscaleQueueItemSettings(
-        item.id,
-        desiredScaleFactor,
-        desiredOutputFormat
-      );
-      setQueueResponse((current) =>
-        current
-          ? {
-              ...current,
-              items: current.items.map((queueItem) =>
-                queueItem.id === updated.id ? updated : queueItem
-              )
-            }
-          : current
-      );
-      setQueueMessage("Queue item settings updated");
+      const health = await getUpscaleQueueAssetHealth();
+      setAssetHealth(health);
+      setHealthMessageVariant(health.ok ? "success" : "warning");
+      setHealthMessage(health.message);
     } catch (error: unknown) {
-      setQueueError(commandErrorMessage(error));
+      setHealthError(commandErrorMessage(error));
     } finally {
-      setIsQueueBusy(false);
+      setIsHealthBusy(false);
     }
   };
 
-  const handleProcessSelected = async () => {
-    const selectedItem = queueResponse?.items.find(
-      (item) => item.id === selectedQueueItemId
-    );
-    if (!selectedItem || !canProcessQueueItem(selectedItem)) {
-      setProcessingMessageVariant("warning");
-      setProcessingMessage("Select one queued or failed item before processing.");
-      return;
-    }
-
-    await runItemProcessing(() => processUpscaleQueueItem(selectedItem.id));
-  };
-
-  const handleProcessNext = async () => {
-    await runBatchProcessing(() => processNextUpscaleQueueItem());
-  };
-
-  const handleProcessAll = async () => {
+  const handleRepairMissingRaw = async () => {
     const confirmed = window.confirm(
-      "Process up to 20 queued images now? This may take time."
+      "Mark missing raw and invalid queue rows as failed? This does not delete raw image files or outputs."
     );
     if (!confirmed) {
       return;
     }
 
-    await runBatchProcessing(() => processAllQueuedUpscaleItems(20));
+    setIsHealthBusy(true);
+    setHealthMessage(null);
+    setHealthError(null);
+
+    try {
+      const health = await repairMissingRawQueueItems();
+      setAssetHealth(health);
+      setHealthMessageVariant(health.ok ? "success" : "warning");
+      setHealthMessage(health.message);
+      await refreshQueue();
+    } catch (error: unknown) {
+      setHealthError(commandErrorMessage(error));
+    } finally {
+      setIsHealthBusy(false);
+    }
   };
 
   const handleRepairStaleProcessing = async () => {
@@ -303,24 +330,29 @@ export function UpscaleTestPage() {
     }
   };
 
-  const handleRetryFailedItem = async (queueItemId: string) => {
-    await runItemProcessing(() => retryFailedUpscaleQueueItem(queueItemId));
-  };
-
-  const runItemProcessing = async (
-    action: () => Promise<UpscaleProcessItemResult>
+  const handleStartProcessingJob = async (
+    queueItemId: string,
+    plan: UpscaleProcessingPlanInput
   ) => {
     setIsProcessingBusy(true);
     setProcessingMessage(null);
     setProcessingError(null);
-    setLastBatchResult(null);
+    setJobBanner(null);
 
     try {
-      const result = await action();
-      setLastProcessResult(result);
+      const result = await startUpscaleProcessingJob(queueItemId, plan);
       setProcessingMessageVariant(result.ok ? "success" : "warning");
       setProcessingMessage(result.message);
-      await refreshQueue();
+      if (result.ok) {
+        setJobBanner(result.message);
+        const job = await getUpscaleProcessingJob(result.job_id);
+        setActiveJob(job);
+      } else if (result.job_id) {
+        const job = await getUpscaleProcessingJob(result.job_id);
+        setActiveJob(job);
+      } else {
+        await refreshQueue(result.message);
+      }
     } catch (error: unknown) {
       setProcessingError(commandErrorMessage(error));
     } finally {
@@ -328,20 +360,42 @@ export function UpscaleTestPage() {
     }
   };
 
-  const runBatchProcessing = async (
-    action: () => Promise<UpscaleProcessBatchResult>
-  ) => {
-    setIsProcessingBusy(true);
-    setProcessingMessage(null);
+  const handleOpenUpscaledFolder = async () => {
     setProcessingError(null);
-    setLastProcessResult(null);
 
     try {
-      const result = await action();
-      setLastBatchResult(result);
+      const result = await openManagedFolder("upscaled");
       setProcessingMessageVariant(result.ok ? "success" : "warning");
-      setProcessingMessage(buildBatchNotice(result));
-      await refreshQueue();
+      setProcessingMessage(result.message);
+    } catch (error: unknown) {
+      setProcessingError(commandErrorMessage(error));
+    }
+  };
+
+  const handleRepairInterruptedJob = async () => {
+    if (!activeJob || !isActiveJobRunning(activeJob)) {
+      return;
+    }
+
+    const confirmed = window.confirm(
+      "Use this only if the app was closed, frozen, or the job is no longer actually running. This will unlock processing."
+    );
+    if (!confirmed) {
+      return;
+    }
+
+    setIsProcessingBusy(true);
+    setProcessingError(null);
+    setProcessingMessage(null);
+
+    try {
+      const jobId = activeJob.job_id;
+      const result = await repairInterruptedUpscaleProcessingJob();
+      const repairedJob = await getUpscaleProcessingJob(jobId);
+      setActiveJob(repairedJob);
+      setProcessingMessageVariant(result.repaired_jobs > 0 ? "warning" : "success");
+      setProcessingMessage(result.message);
+      await refreshQueue(result.message);
     } catch (error: unknown) {
       setProcessingError(commandErrorMessage(error));
     } finally {
@@ -435,19 +489,27 @@ export function UpscaleTestPage() {
     }
   };
 
+  const hasQueueHealthIssue =
+    (assetHealth?.missing_raw ?? 0) > 0 || (assetHealth?.invalid_path ?? 0) > 0;
+  const activeItems = queueResponse?.items ?? [];
+  const jobIsActive = Boolean(activeJob && isActiveJobRunning(activeJob));
+
   return (
     <section className="page">
       <div className="page-heading">
         <div>
           <p className="eyebrow">Workspace</p>
           <h2>Upscale Factory</h2>
-          <p>
-            Import local images into a safe queue and run local Real-ESRGAN
-            processing when the managed engine is installed.
-          </p>
         </div>
-        <Badge variant="success">Processing foundation</Badge>
+        <Badge variant="success">Worker queue</Badge>
       </div>
+
+      {(assetHealth?.missing_raw ?? 0) > 0 ? (
+        <div className="notice notice-warning">
+          Some queued files are missing from AppData. Click Mark Missing Raw as
+          Failed or Start Fresh Queue.
+        </div>
+      ) : null}
 
       {queueError ? (
         <div className="notice notice-warning">{queueError}</div>
@@ -465,154 +527,169 @@ export function UpscaleTestPage() {
       ) : null}
 
       <Card
-        title="Image Intake"
-        status={<Badge variant="info">Phase 1 foundation</Badge>}
+        title="1. Import Images"
+        status={<Badge variant="info">AppData copy</Badge>}
       >
-        <p>
-          Native dialogs copy supported local images into AppData and register
-          queue rows. No source files are changed.
-        </p>
         <div className="settings-actions">
           <Button
-            disabled={isQueueBusy}
+            disabled={isQueueBusy || jobIsActive}
             onClick={() => void handleImportImages()}
             variant="primary"
           >
             Import Images
           </Button>
           <Button
-            disabled={isQueueBusy}
+            disabled={isQueueBusy || jobIsActive}
             onClick={() => void handleImportFolder()}
             variant="secondary"
           >
             Import Folder
           </Button>
-          <Button
-            disabled={isQueueBusy}
-            onClick={() => void refreshQueue()}
-            variant="secondary"
-          >
-            Refresh Queue
-          </Button>
-          <Button
-            disabled={isQueueBusy || !queueResponse?.summary.total}
-            onClick={() => void handleClearQueue()}
-            variant="ghost"
-          >
-            Clear Queue
-          </Button>
         </div>
+        <p>Last import only shows the latest action. Current queue is below.</p>
+        {importResult ? <ImportResultDetails result={importResult} /> : null}
       </Card>
 
-      {importResult ? <ImportResultCard result={importResult} /> : null}
-
       <Card
-        className="queue-summary-card"
-        title="Current Queue Summary"
+        title="2. Engine Status"
         status={
-          <Badge variant={queueResponse?.summary.queued ? "success" : "info"}>
-            {queueResponse?.summary.queued
-              ? `${queueResponse.summary.queued} queued`
-              : "No queued images"}
+          <Badge variant={discovery?.ok ? "success" : "warning"}>
+            {discovery?.ok ? "Engine Ready" : "Engine Missing"}
           </Badge>
         }
       >
-        <p>
-          This is the total current queue. It does not reset when you import
-          another file.
-        </p>
         <div className="summary-grid">
-          <SummaryItem label="Queued" value={queueResponse?.summary.queued ?? 0} />
           <SummaryItem
-            label="Processing"
-            value={queueResponse?.summary.processing ?? 0}
+            label="Engine"
+            value={discovery?.ok ? "Ready" : "Missing"}
           />
           <SummaryItem
-            label="Completed"
-            value={queueResponse?.summary.completed ?? 0}
+            label="Binary"
+            value={discovery?.binary?.exists ? "Found" : "Missing"}
           />
-          <SummaryItem label="Failed" value={queueResponse?.summary.failed ?? 0} />
-          <SummaryItem label="Removed" value={queueResponse?.summary.removed ?? 0} />
-          <SummaryItem label="Total" value={queueResponse?.summary.total ?? 0} />
+          <SummaryItem
+            label="Model Files"
+            value={discovery?.models.model_files_count ?? 0}
+          />
         </div>
-        <div className="kv-list">
-          <div className="kv-row">
-            <span>Raw asset folder</span>
-            <span className="path-value">
-              {intakeSummary?.raw_asset_dir ?? "Not loaded yet"}
-            </span>
-          </div>
+        <div className="settings-actions">
+          <Button
+            disabled={isEngineBusy}
+            onClick={() => void handleDiscover()}
+            variant="primary"
+          >
+            Discover Engine
+          </Button>
+          <Button
+            disabled={isEngineBusy}
+            onClick={() => void handleOpenEngineFolder()}
+            variant="secondary"
+          >
+            Open Engine Folder
+          </Button>
         </div>
+        {engineErrorMessage ? (
+          <div className="notice notice-warning">{engineErrorMessage}</div>
+        ) : null}
+        {engineMessage ? (
+          <div className="notice notice-success">{engineMessage}</div>
+        ) : null}
       </Card>
 
       <Card
-        title="Processing Controls"
+        title="3. Queue Health"
+        status={
+          <Badge variant={assetHealth?.ok ? "success" : "warning"}>
+            {assetHealth?.ok ? "Files Healthy" : "Needs Check"}
+          </Badge>
+        }
+      >
+        <div className="summary-grid">
+          <SummaryItem label="Healthy" value={assetHealth?.healthy ?? 0} />
+          <SummaryItem label="Missing Raw" value={assetHealth?.missing_raw ?? 0} />
+          <SummaryItem
+            label="Invalid Path"
+            value={assetHealth?.invalid_path ?? 0}
+          />
+        </div>
+        <div className="settings-actions">
+          <Button
+            disabled={isHealthBusy}
+            onClick={() => void handleCheckQueueFiles()}
+            variant="primary"
+          >
+            Check Queue Files
+          </Button>
+          <Button
+            disabled={isHealthBusy || jobIsActive || !hasQueueHealthIssue}
+            onClick={() => void handleRepairMissingRaw()}
+            variant="secondary"
+          >
+            Mark Missing Raw as Failed
+          </Button>
+        </div>
+        {hasQueueHealthIssue ? (
+          <div className="notice notice-warning">
+            Some queue rows point to raw files that are missing from AppData.
+            This can happen if AppData folders were manually deleted. Re-import
+            those images or remove the broken rows.
+          </div>
+        ) : null}
+        {healthError ? (
+          <div className="notice notice-warning">{healthError}</div>
+        ) : null}
+        {healthMessage ? (
+          <div
+            className={`notice ${
+              healthMessageVariant === "warning"
+                ? "notice-warning"
+                : "notice-success"
+            }`}
+          >
+            {healthMessage}
+          </div>
+        ) : null}
+      </Card>
+
+      <Card
+        title="4. Process Images"
         status={
           <Badge variant={processingStatus?.processing ? "warning" : "info"}>
             {processingStatus?.processing
-              ? `${processingStatus.processing} processing`
-              : "Local only"}
+              ? `${processingStatus.processing} Processing`
+              : "Ready"}
           </Badge>
         }
       >
-        <p>
-          Run local Real-ESRGAN processing for queued images. No cloud
-          processing is used.
-        </p>
+        <p>Completed images are saved in AppData/assets/upscaled/YYYYMMDD.</p>
+        <div className="settings-actions worker-primary-actions">
+          <Button
+            disabled={isQueueBusy || jobIsActive || !queueResponse?.summary.total}
+            onClick={() => void handleStartFreshQueue()}
+            variant="ghost"
+          >
+            Start Fresh Queue
+          </Button>
+          <Button
+            disabled={isProcessingBusy}
+            onClick={() => void handleOpenUpscaledFolder()}
+            variant="secondary"
+          >
+            Open Upscaled Folder
+          </Button>
+        </div>
         <div className="summary-grid">
-          <SummaryItem label="Queued" value={processingStatus?.queued ?? 0} />
+          <SummaryItem label="Ready" value={processingStatus?.queued ?? 0} />
           <SummaryItem
             label="Processing"
             value={processingStatus?.processing ?? 0}
           />
+          <SummaryItem label="Done" value={processingStatus?.completed ?? 0} />
           <SummaryItem
-            label="Completed"
-            value={processingStatus?.completed ?? 0}
+            label="Needs Attention"
+            value={processingStatus?.failed ?? 0}
           />
-          <SummaryItem label="Failed" value={processingStatus?.failed ?? 0} />
-          <SummaryItem label="Removed" value={processingStatus?.removed ?? 0} />
         </div>
-        <div className="settings-actions">
-          <Button
-            disabled={isProcessingBusy || !processingStatus?.queued}
-            onClick={() => void handleProcessNext()}
-            variant="primary"
-          >
-            Process Next
-          </Button>
-          <Button
-            disabled={
-              isProcessingBusy ||
-              !selectedQueueItemId ||
-              !queueResponse?.items.some(
-                (item) => item.id === selectedQueueItemId && canProcessQueueItem(item)
-              )
-            }
-            onClick={() => void handleProcessSelected()}
-            variant="secondary"
-          >
-            Process Selected
-          </Button>
-          <Button
-            disabled={isProcessingBusy || !processingStatus?.queued}
-            onClick={() => void handleProcessAll()}
-            variant="secondary"
-          >
-            Process All Queued
-          </Button>
-          <Button
-            disabled={isProcessingBusy || !processingStatus?.processing}
-            onClick={() => void handleRepairStaleProcessing()}
-            variant="ghost"
-          >
-            Repair Stale Processing
-          </Button>
-        </div>
-        {selectedQueueItemId ? (
-          <div className="notice notice-success">
-            Selected queue item: {selectedQueueItemId}
-          </div>
-        ) : null}
         {processingError ? (
           <div className="notice notice-warning">{processingError}</div>
         ) : null}
@@ -627,251 +704,95 @@ export function UpscaleTestPage() {
             {processingMessage}
           </div>
         ) : null}
-        {lastBatchResult ? <BatchResultSummary result={lastBatchResult} /> : null}
-        {lastProcessResult ? (
-          <ProcessResultSummary result={lastProcessResult} />
+        {jobBanner && activeJob && isActiveJobRunning(activeJob) ? (
+          <div className="notice notice-success">{jobBanner}</div>
         ) : null}
-      </Card>
+        {activeJob ? (
+          <ActiveJobCard
+            job={activeJob}
+            imageName={imageNameForJob(activeJob, activeItems)}
+            onOpenUpscaledFolder={handleOpenUpscaledFolder}
+            onRepairInterruptedJob={handleRepairInterruptedJob}
+          />
+        ) : null}
+        <div className="settings-actions secondary-actions">
+          <Button
+            disabled={isProcessingBusy || jobIsActive || !processingStatus?.processing}
+            onClick={() => void handleRepairStaleProcessing()}
+            variant="ghost"
+          >
+            Repair Stale Processing
+          </Button>
+        </div>
 
-      <Card
-        title="Current Upscale Queue"
-        status={<Badge variant="info">Processing foundation</Badge>}
-      >
-        <p>
-          These are the current active queue rows. Last Import Result above only
-          describes the most recent import action.
-        </p>
-        {queueResponse && queueResponse.items.length > 0 ? (
-          <>
-            <p className="queue-count-label">
-              Showing {queueResponse.items.length} active queued item(s).
-            </p>
-            <div className="queue-table">
-              <div className="queue-row queue-row-header">
-                <span>Select</span>
-                <span>Image</span>
-                <span>Status</span>
-                <span>Size</span>
-                <span>Scale</span>
-                <span>Format</span>
-                <span>Output</span>
-                <span>Message</span>
-                <span>Created</span>
-                <span>Actions</span>
-              </div>
-              {queueResponse.items.map((item) => (
-                <QueueRow
-                  disabled={isQueueBusy || isProcessingBusy}
-                  item={item}
-                  key={item.id}
-                  onRemove={handleRemoveQueueItem}
-                  onRetry={handleRetryFailedItem}
-                  onSelect={setSelectedQueueItemId}
-                  onUpdate={handleQueueItemSettingsChange}
-                  selected={selectedQueueItemId === item.id}
-                />
-              ))}
-            </div>
-          </>
-        ) : (
-          <div className="empty-state">
-            No active queued images. Imported raw files may still exist in
-            AppData if they were imported earlier.
+        {activeItems.length > 0 ? (
+          <div className="queue-card-list">
+            {activeItems.map((item) => (
+              <QueueItemCard
+                disabled={isQueueBusy || isProcessingBusy}
+                health={queueHealthById.get(item.id)}
+                item={item}
+                key={item.id}
+                onStartProcessing={handleStartProcessingJob}
+                onRemove={handleRemoveQueueItem}
+                processingLocked={jobIsActive}
+              />
+            ))}
           </div>
+        ) : (
+          <div className="empty-state">No ready images in queue.</div>
         )}
       </Card>
 
-      <div className="page-heading compact-heading">
-        <div>
-          <p className="eyebrow">Engine Setup</p>
-          <h2>Real-ESRGAN Foundation</h2>
-          <p>
-            Engine discovery and safe test actions use only the managed AppData
-            engine folder.
-          </p>
-        </div>
-        <Badge variant={discovery?.ok ? "success" : "warning"}>
-          {discovery?.ok ? "Engine ready" : "Discovery needed"}
-        </Badge>
-      </div>
-
-      {engineErrorMessage ? (
-        <div className="notice notice-warning">{engineErrorMessage}</div>
-      ) : null}
-      {engineMessage ? (
-        <div className="notice notice-success">{engineMessage}</div>
-      ) : null}
-
-      <Card title="Engine controls" status={<Badge variant="info">Phase 0</Badge>}>
-        <div className="settings-actions">
-          <Button
-            disabled={isEngineBusy}
-            onClick={() => void handleDiscover()}
-            variant="primary"
-          >
-            Discover Engine
-          </Button>
-          <Button
-            disabled={isEngineBusy}
-            onClick={() => void handleShowLayout()}
-            variant="secondary"
-          >
-            Show Expected Layout
-          </Button>
-          <Button
-            disabled={isEngineBusy}
-            onClick={() => void handleSafeTest()}
-            variant="secondary"
-          >
-            Run Safe Test
-          </Button>
-          <Button
-            disabled={isEngineBusy}
-            onClick={() => void handleOpenEngineFolder()}
-            variant="secondary"
-          >
-            Open Engine Folder
-          </Button>
-          <Button
-            disabled={isEngineBusy}
-            onClick={() => void handleClearOutput()}
-            variant="ghost"
-          >
-            Clear Test Output
-          </Button>
-        </div>
-      </Card>
-
-      {layout ? (
-        <Card
-          eyebrow="Backend-managed paths"
-          title="Expected Layout"
-          status={<Badge variant="neutral">No downloads</Badge>}
-        >
-          <div className="kv-list">
-            <PathRow label="Engine directory" value={layout.engine_dir} />
-            <PathRow label="Binary" value={layout.expected_binary_path} />
-            <PathRow label="Models folder" value={layout.expected_models_dir} />
-            <PathRow label="version.json" value={layout.expected_version_json} />
-            <PathRow label="Safe input" value={layout.expected_test_input_path} />
-            <PathRow label="Safe output" value={layout.expected_test_output_path} />
-          </div>
-          <div className="check-list">
-            {layout.instructions.map((instruction) => (
-              <div className="check-row" key={instruction}>
-                <strong>{instruction}</strong>
-                <Badge variant="info">Instruction</Badge>
-              </div>
-            ))}
-          </div>
-        </Card>
-      ) : null}
-
       <Card
-        eyebrow="Discovery status"
-        title="Local Engine"
-        status={
-          <Badge variant={discovery?.ok ? "success" : "warning"}>
-            {discovery?.message ?? "Not checked yet"}
-          </Badge>
-        }
+        title="Engine Setup Details"
+        status={<Badge variant="neutral">Secondary</Badge>}
       >
-        <div className="summary-grid">
-          <SummaryItem
-            label="Binary"
-            value={discovery?.binary?.exists ? "Found" : "Missing"}
-          />
-          <SummaryItem
-            label="Models folder"
-            value={discovery?.models.models_dir_exists ? "Found" : "Missing"}
-          />
-          <SummaryItem
-            label="Model files"
-            value={discovery?.models.model_files_count ?? 0}
-          />
-          <SummaryItem
-            label="Help command"
-            value={
-              discovery?.can_run_basic_command ? "Available" : "Not available"
-            }
-          />
-        </div>
-        <div className="kv-list">
-          <PathRow
-            label="Engine directory"
-            value={discovery?.engine_dir ?? "Not loaded"}
-          />
-          <PathRow
-            label="Binary path"
-            value={discovery?.binary?.path ?? "Not loaded"}
-          />
-          <PathRow
-            label="Models directory"
-            value={discovery?.models.models_dir ?? "Not loaded"}
-          />
-          <div className="kv-row">
-            <span>version.json</span>
-            <span>{discovery?.version_json_exists ? "Found" : "Missing"}</span>
+        <details className="secondary-details">
+          <summary>Expected layout and safe test</summary>
+          <div className="settings-actions">
+            <Button
+              disabled={isEngineBusy}
+              onClick={() => void handleShowLayout()}
+              variant="secondary"
+            >
+              Show Expected Layout
+            </Button>
+            <Button
+              disabled={isEngineBusy}
+              onClick={() => void handleSafeTest()}
+              variant="secondary"
+            >
+              Run Safe Test
+            </Button>
+            <Button
+              disabled={isEngineBusy}
+              onClick={() => void handleClearOutput()}
+              variant="ghost"
+            >
+              Clear Test Output
+            </Button>
           </div>
-        </div>
-        {!discovery?.binary?.exists ? (
-          <div className="notice notice-warning">
-            Real-ESRGAN binary is missing. Place the ncnn Vulkan binary in the
-            engine directory. The app does not download binaries in Phase 1.
-          </div>
-        ) : null}
-        {discovery?.detected_version_text ? (
-          <pre className="preview-box">{discovery.detected_version_text}</pre>
-        ) : null}
+          {layout ? <ExpectedLayoutDetails layout={layout} /> : null}
+          {discovery ? <EngineDiscoveryDetails discovery={discovery} /> : null}
+          {testResult ? <SafeTestDetails testResult={testResult} /> : null}
+        </details>
       </Card>
 
-      {testResult ? (
-        <Card
-          eyebrow="Fixed safe command"
-          title="Safe Test Result"
-          status={
-            <Badge variant={testResult.ok ? "success" : "warning"}>
-              {testResult.message}
-            </Badge>
-          }
-        >
-          <div className="kv-list">
-            <PathRow label="Command preview" value={testResult.command_preview} />
-            <div className="kv-row">
-              <span>Attempted</span>
-              <span>{testResult.attempted ? "Yes" : "No"}</span>
-            </div>
-            <div className="kv-row">
-              <span>Exit code</span>
-              <span>{testResult.exit_code ?? "Not available"}</span>
-            </div>
-            <PathRow
-              label="Output file"
-              value={testResult.output_file ?? "Not created"}
-            />
-          </div>
-          {testResult.stdout_preview ? (
-            <pre className="preview-box">{testResult.stdout_preview}</pre>
-          ) : null}
-          {testResult.stderr_preview ? (
-            <pre className="preview-box">{testResult.stderr_preview}</pre>
-          ) : null}
-        </Card>
-      ) : null}
+      <div className="kv-list">
+        <PathRow
+          label="Raw asset folder"
+          value={intakeSummary?.raw_asset_dir ?? "Not loaded yet"}
+        />
+      </div>
     </section>
   );
 }
 
-function ImportResultCard({ result }: { result: ImageImportResult }) {
+function ImportResultDetails({ result }: { result: ImageImportResult }) {
   return (
-    <Card
-      title="Last Import Result"
-      status={<Badge variant={result.ok ? "success" : "warning"}>{result.message}</Badge>}
-    >
-      <p>
-        This shows only the latest import action. Existing queued images remain
-        in the queue below.
-      </p>
+    <details className="secondary-details">
+      <summary>Last Import Result</summary>
       <div className="summary-grid">
         <SummaryItem label="Selected" value={result.summary.selected} />
         <SummaryItem label="Imported" value={result.summary.imported} />
@@ -893,7 +814,7 @@ function ImportResultCard({ result }: { result: ImageImportResult }) {
           ))}
         </div>
       ) : null}
-    </Card>
+    </details>
   );
 }
 
@@ -912,170 +833,342 @@ function ImportResultRow({ item }: { item: ImageImportItemResult }) {
   );
 }
 
-function BatchResultSummary({ result }: { result: UpscaleProcessBatchResult }) {
-  return (
-    <div className="processing-result">
-      <div className="summary-grid">
-        <SummaryItem label="Attempted" value={result.attempted} />
-        <SummaryItem label="Completed" value={result.completed} />
-        <SummaryItem label="Failed" value={result.failed} />
-      </div>
-      {result.results.length > 0 ? (
-        <div className="compact-list">
-          {result.results.map((item) => (
-            <div className="compact-list-row" key={item.queue_item_id}>
-              <span>{item.queue_item_id}</span>
-              <Badge variant={item.ok ? "success" : "warning"}>
-                {item.status}
-              </Badge>
-            </div>
-          ))}
-        </div>
-      ) : null}
-    </div>
-  );
-}
+type OutputTargetOption =
+  | "scale_2"
+  | "scale_4"
+  | "scale_8"
+  | "scale_10"
+  | "target_8k"
+  | "custom_long_edge";
 
-function ProcessResultSummary({ result }: { result: UpscaleProcessItemResult }) {
-  return (
-    <div className="processing-result">
-      <div className="kv-list">
-        <div className="kv-row">
-          <span>Status</span>
-          <span>{result.status}</span>
-        </div>
-        <PathRow
-          label="Output"
-          value={result.output_relative_path ?? "Not created"}
-        />
-        <div className="kv-row">
-          <span>Duration</span>
-          <span>{formatDuration(result.duration_ms)}</span>
-        </div>
-      </div>
-      {result.error ? (
-        <div className="notice notice-warning">{result.error}</div>
-      ) : null}
-      {result.stdout_preview ? (
-        <pre className="preview-box">{result.stdout_preview}</pre>
-      ) : null}
-      {result.stderr_preview ? (
-        <pre className="preview-box">{result.stderr_preview}</pre>
-      ) : null}
-    </div>
-  );
-}
-
-function QueueRow({
-  disabled,
-  item,
-  onRemove,
-  onRetry,
-  onSelect,
-  selected,
-  onUpdate
+function ActiveJobCard({
+  imageName,
+  job,
+  onOpenUpscaledFolder,
+  onRepairInterruptedJob
 }: {
-  disabled: boolean;
-  item: UpscaleQueueItem;
-  onRemove: (queueItemId: string) => Promise<void>;
-  onRetry: (queueItemId: string) => Promise<void>;
-  onSelect: (queueItemId: string) => void;
-  selected: boolean;
-  onUpdate: (
-    item: UpscaleQueueItem,
-    desiredScaleFactor: UpscaleQueueItem["desired_scale_factor"],
-    desiredOutputFormat: UpscaleQueueItem["desired_output_format"]
-  ) => Promise<void>;
+  imageName: string;
+  job: UpscaleProcessingJobStatus;
+  onOpenUpscaledFolder: () => Promise<void>;
+  onRepairInterruptedJob: () => Promise<void>;
 }) {
-  const canProcess = canProcessQueueItem(item);
+  const canRepair = isActiveJobRunning(job);
 
   return (
-    <div className="queue-row">
-      <span>
-        <Button
-          disabled={disabled || !canProcess}
-          onClick={() => onSelect(item.id)}
-          variant={selected ? "secondary" : "ghost"}
-        >
-          {selected ? "Selected" : "Select"}
+    <div className="active-job-card">
+      <div className="queue-card-header">
+        <div className="queue-card-title">
+          <strong>{imageName}</strong>
+          <span>{job.progress_label || job.stage}</span>
+        </div>
+        <Badge variant={job.status === "failed" ? "warning" : "info"}>
+          {job.status}
+        </Badge>
+      </div>
+      <div className="queue-card-meta">
+        <MetaItem label="Target" value={job.target_label} />
+        <MetaItem label="Quality" value={qualityModeLabel(job.quality_mode)} />
+        <MetaItem label="Tile Size" value={job.tile_size} />
+        <MetaItem label="Stage" value={job.stage || "pending"} />
+        <MetaItem label="Elapsed" value={elapsedJobTime(job)} />
+        <MetaItem
+          label="Output"
+          value={job.output_relative_path ?? "Not created yet"}
+        />
+      </div>
+      {canRepair ? (
+        <div className="notice notice-warning">
+          Large jobs may take time. If Windows was closed or the app was
+          restarted while this job was running, use Mark Interrupted Job as
+          Failed.
+        </div>
+      ) : null}
+      {job.error ? <div className="notice notice-warning">{job.error}</div> : null}
+      {job.output_relative_path ? (
+        <div className="notice notice-success">
+          Output saved: {job.output_relative_path}
+        </div>
+      ) : null}
+      <div className="queue-card-actions">
+        <Button onClick={() => void onOpenUpscaledFolder()} variant="secondary">
+          Open Upscaled Folder
         </Button>
-      </span>
-      <span>
-        <strong>{item.original_name}</strong>
-        <small className="path-value">{item.relative_path}</small>
-        <small>{item.source_kind}</small>
-      </span>
-      <span>
-        <Badge variant={badgeVariantForQueueStatus(item.status)}>{item.status}</Badge>
-      </span>
-      <span>{formatSize(item.size_bytes)}</span>
-      <span>
-        <select
-          disabled={disabled || item.status !== "queued"}
-          value={item.desired_scale_factor}
-          onChange={(event) =>
-            void onUpdate(
-              item,
-              Number(event.currentTarget.value) as UpscaleQueueItem["desired_scale_factor"],
-              item.desired_output_format
-            )
-          }
-        >
-          {scaleOptions.map((scale) => (
-            <option key={scale} value={scale}>
-              {scale}x
-            </option>
-          ))}
-        </select>
-      </span>
-      <span>
-        <select
-          disabled={disabled || item.status !== "queued"}
-          value={item.desired_output_format}
-          onChange={(event) =>
-            void onUpdate(
-              item,
-              item.desired_scale_factor,
-              event.currentTarget.value as UpscaleQueueItem["desired_output_format"]
-            )
-          }
-        >
-          {outputFormatOptions.map((format) => (
-            <option key={format} value={format}>
-              {format.toUpperCase()}
-            </option>
-          ))}
-        </select>
-      </span>
-      <span>
-        <span className="path-value">
-          {item.output_relative_path ?? "Not created"}
-        </span>
-      </span>
-      <span>
-        <span className="path-value">
-          {item.processing_error ?? item.processing_completed_at ?? "None"}
-        </span>
-      </span>
-      <span className="path-value">{item.created_at}</span>
-      <span className="queue-row-actions">
-        {item.status === "failed" ? (
+        {canRepair ? (
           <Button
-            disabled={disabled}
-            onClick={() => void onRetry(item.id)}
-            variant="secondary"
+            onClick={() => void onRepairInterruptedJob()}
+            variant="ghost"
           >
-            Retry
+            Mark Interrupted Job as Failed
           </Button>
         ) : null}
+      </div>
+    </div>
+  );
+}
+
+function QueueItemCard({
+  disabled,
+  health,
+  item,
+  onRemove,
+  onStartProcessing,
+  processingLocked
+}: {
+  disabled: boolean;
+  health: UpscaleQueueAssetHealthItem | undefined;
+  item: UpscaleQueueItem;
+  onStartProcessing: (
+    queueItemId: string,
+    plan: UpscaleProcessingPlanInput
+  ) => Promise<void>;
+  onRemove: (queueItemId: string) => Promise<void>;
+  processingLocked: boolean;
+}) {
+  const [targetOption, setTargetOption] =
+    useState<OutputTargetOption>("scale_2");
+  const [customLongEdge, setCustomLongEdge] = useState(7680);
+  const [qualityMode, setQualityMode] =
+    useState<UpscaleProcessingQualityMode>("safe");
+  const [tileSize, setTileSize] =
+    useState<UpscaleProcessingTileSize>("auto");
+  const [jobOutputFormat, setJobOutputFormat] =
+    useState<UpscaleProcessingPlanInput["output_format"]>("png");
+  const canProcess = canProcessQueueItem(item);
+  const canRemove = item.status === "queued" || item.status === "failed";
+  const workerMessage = queueItemWorkerMessage(item, health);
+  const plan = buildProcessingPlanInput(
+    targetOption,
+    customLongEdge,
+    qualityMode,
+    tileSize,
+    jobOutputFormat
+  );
+  const isLargeTarget = matchesLargeTarget(targetOption);
+  const controlsDisabled = disabled || processingLocked;
+
+  return (
+    <article className="queue-item-card">
+      <header className="queue-card-header">
+        <div className="queue-card-title">
+          <strong>{item.original_name}</strong>
+          <span className="path-value">{item.relative_path}</span>
+        </div>
+        <Badge variant={badgeVariantForQueueStatus(item.status)}>
+          {queueStatusLabel(item.status)}
+        </Badge>
+      </header>
+
+      <div className="queue-card-meta">
+        <MetaItem label="Size" value={formatSize(item.size_bytes)} />
+        <MetaItem label="Source" value={item.source_kind} />
+        <MetaItem
+          label="Output"
+          value={item.output_relative_path ?? "Not created"}
+        />
+      </div>
+
+      <div className="queue-card-controls large-output-controls">
+        <label className="settings-field">
+          <span>Output Target</span>
+          <select
+            disabled={controlsDisabled || !canProcess}
+            value={targetOption}
+            onChange={(event) =>
+              setTargetOption(event.currentTarget.value as OutputTargetOption)
+            }
+          >
+            <option value="scale_2">2x quick test</option>
+            <option value="scale_4">4x standard</option>
+            <option value="scale_8">8x large</option>
+            <option value="scale_10">10x large</option>
+            <option value="target_8k">8K long edge</option>
+            <option value="custom_long_edge">Custom long edge</option>
+          </select>
+        </label>
+        {targetOption === "custom_long_edge" ? (
+          <label className="settings-field">
+            <span>Long Edge</span>
+            <input
+              disabled={controlsDisabled || !canProcess}
+              min={1000}
+              max={10000}
+              onChange={(event) =>
+                setCustomLongEdge(Number(event.currentTarget.value))
+              }
+              type="number"
+              value={customLongEdge}
+            />
+          </label>
+        ) : null}
+        <label className="settings-field">
+          <span>Quality Mode</span>
+          <select
+            disabled={controlsDisabled || !canProcess}
+            value={qualityMode}
+            onChange={(event) =>
+              setQualityMode(
+                event.currentTarget.value as UpscaleProcessingQualityMode
+              )
+            }
+          >
+            <option value="safe">Safe laptop mode</option>
+            <option value="balanced">Balanced</option>
+            <option value="ultra">Ultra quality</option>
+          </select>
+        </label>
+        <label className="settings-field">
+          <span>Tile Size</span>
+          <select
+            disabled={controlsDisabled || !canProcess}
+            value={tileSize}
+            onChange={(event) =>
+              setTileSize(parseTileSize(event.currentTarget.value))
+            }
+          >
+            <option value="auto">Auto</option>
+            <option value={64}>64</option>
+            <option value={128}>128</option>
+            <option value={256}>256</option>
+            <option value={512}>512</option>
+          </select>
+        </label>
+        <label className="settings-field">
+          <span>Output Format</span>
+          <select
+            disabled={controlsDisabled || !canProcess}
+            value={jobOutputFormat}
+            onChange={(event) =>
+              setJobOutputFormat(
+                event.currentTarget.value as UpscaleProcessingPlanInput["output_format"]
+              )
+            }
+          >
+            {jobOutputFormatOptions.map((format) => (
+              <option key={format} value={format}>
+                {format.toUpperCase()}
+              </option>
+            ))}
+          </select>
+        </label>
+      </div>
+      <p className="field-note">
+        Safe laptop mode may take longer but prevents crashes on low-spec
+        systems.
+      </p>
+      {isLargeTarget ? (
+        <div className="notice notice-warning">
+          Large output may take several minutes. The app will keep running the
+          job in the background.
+        </div>
+      ) : null}
+      {isLargeTarget && qualityMode === "ultra" ? (
+        <div className="notice notice-warning">
+          Ultra quality uses extra Real-ESRGAN passes and can be slow.
+        </div>
+      ) : null}
+      {plan.output_format === "webp" && plan.mode !== "scale" ? (
+        <div className="notice notice-warning">
+          Exact 8K/custom final resize works with PNG or JPG in Phase 1.
+        </div>
+      ) : null}
+
+      {workerMessage ? (
+        <div
+          className={`queue-card-message ${
+            item.status === "failed" || health?.health === "missing_raw"
+              ? "notice-warning"
+              : "notice-success"
+          }`}
+        >
+          {workerMessage}
+        </div>
+      ) : null}
+
+      <div className="queue-card-actions">
         <Button
-          disabled={disabled || item.status !== "queued"}
+          disabled={controlsDisabled || !canProcess}
+          onClick={() => void onStartProcessing(item.id, plan)}
+          variant="primary"
+        >
+          Start Processing
+        </Button>
+        <Button
+          disabled={disabled || !canRemove || processingLocked}
           onClick={() => void onRemove(item.id)}
           variant="ghost"
         >
           Remove
         </Button>
-      </span>
+      </div>
+    </article>
+  );
+}
+
+function ExpectedLayoutDetails({ layout }: { layout: EngineExpectedLayout }) {
+  return (
+    <div className="kv-list">
+      <PathRow label="Engine directory" value={layout.engine_dir} />
+      <PathRow label="Binary" value={layout.expected_binary_path} />
+      <PathRow label="Models folder" value={layout.expected_models_dir} />
+      <PathRow label="version.json" value={layout.expected_version_json} />
+      <PathRow label="Safe input" value={layout.expected_test_input_path} />
+      <PathRow label="Safe output" value={layout.expected_test_output_path} />
+    </div>
+  );
+}
+
+function EngineDiscoveryDetails({
+  discovery
+}: {
+  discovery: EngineDiscoveryStatus;
+}) {
+  return (
+    <div className="kv-list">
+      <PathRow label="Engine directory" value={discovery.engine_dir} />
+      <PathRow
+        label="Binary path"
+        value={discovery.binary?.path ?? "Not loaded"}
+      />
+      <PathRow label="Models directory" value={discovery.models.models_dir} />
+      <div className="kv-row">
+        <span>Help command</span>
+        <span>{discovery.can_run_basic_command ? "Available" : "Not available"}</span>
+      </div>
+      <div className="kv-row">
+        <span>version.json</span>
+        <span>{discovery.version_json_exists ? "Found" : "Missing"}</span>
+      </div>
+      {discovery.detected_version_text ? (
+        <pre className="preview-box">{discovery.detected_version_text}</pre>
+      ) : null}
+    </div>
+  );
+}
+
+function SafeTestDetails({ testResult }: { testResult: EngineTestRunResult }) {
+  return (
+    <div className="processing-result">
+      <div className="kv-list">
+        <PathRow label="Command preview" value={testResult.command_preview} />
+        <div className="kv-row">
+          <span>Attempted</span>
+          <span>{testResult.attempted ? "Yes" : "No"}</span>
+        </div>
+        <div className="kv-row">
+          <span>Exit code</span>
+          <span>{testResult.exit_code ?? "Not available"}</span>
+        </div>
+        <PathRow
+          label="Output file"
+          value={testResult.output_file ?? "Not created"}
+        />
+      </div>
+      {testResult.stdout_preview ? (
+        <pre className="preview-box">{testResult.stdout_preview}</pre>
+      ) : null}
+      {testResult.stderr_preview ? (
+        <pre className="preview-box">{testResult.stderr_preview}</pre>
+      ) : null}
     </div>
   );
 }
@@ -1089,6 +1182,15 @@ function SummaryItem({
 }) {
   return (
     <div className="summary-item">
+      <span>{label}</span>
+      <strong>{value}</strong>
+    </div>
+  );
+}
+
+function MetaItem({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="meta-item">
       <span>{label}</span>
       <strong>{value}</strong>
     </div>
@@ -1121,7 +1223,11 @@ function badgeVariantForQueueStatus(status: UpscaleQueueItem["status"]) {
     return "success";
   }
 
-  if (status === "processing" || status === "failed") {
+  if (status === "processing") {
+    return "info";
+  }
+
+  if (status === "failed") {
     return "warning";
   }
 
@@ -1132,19 +1238,197 @@ function canProcessQueueItem(item: UpscaleQueueItem) {
   return item.status === "queued" || item.status === "failed";
 }
 
+function queueStatusLabel(status: UpscaleQueueItem["status"]) {
+  switch (status) {
+    case "queued":
+      return "Ready";
+    case "processing":
+      return "Processing";
+    case "completed":
+      return "Done";
+    case "failed":
+      return "Needs Attention";
+    case "removed":
+      return "Removed";
+    default:
+      return status;
+  }
+}
+
+function queueItemWorkerMessage(
+  item: UpscaleQueueItem,
+  health: UpscaleQueueAssetHealthItem | undefined
+) {
+  if (
+    item.status === "failed" &&
+    (health?.health === "missing_raw" ||
+      health?.health === "invalid_path" ||
+      item.processing_error === missingRawMessage)
+  ) {
+    return "Raw file missing. Re-import original image or remove this row.";
+  }
+
+  if (
+    item.status === "failed" &&
+    item.processing_error &&
+    /engine|real-esrgan|model/i.test(item.processing_error)
+  ) {
+    return "Engine issue. Discover engine, then retry.";
+  }
+
+  if (item.status === "failed") {
+    return item.processing_error ?? "Image needs attention.";
+  }
+
+  if (item.status === "queued") {
+    return health?.health === "missing_raw"
+      ? "Raw file missing. Re-import original image or remove this row."
+      : "Ready to process.";
+  }
+
+  if (item.status === "processing") {
+    return "Processing now.";
+  }
+
+  if (item.status === "completed") {
+    return "Done.";
+  }
+
+  return null;
+}
+
+function buildProcessingPlanInput(
+  targetOption: OutputTargetOption,
+  customLongEdge: number,
+  qualityMode: UpscaleProcessingQualityMode,
+  tileSize: UpscaleProcessingTileSize,
+  outputFormat: UpscaleProcessingPlanInput["output_format"]
+): UpscaleProcessingPlanInput {
+  if (targetOption === "target_8k") {
+    return {
+      mode: "target_8k",
+      scale: null,
+      target_long_edge_px: null,
+      quality_mode: qualityMode,
+      output_format: outputFormat,
+      tile_size: tileSize
+    };
+  }
+
+  if (targetOption === "custom_long_edge") {
+    return {
+      mode: "target_long_edge",
+      scale: null,
+      target_long_edge_px: customLongEdge,
+      quality_mode: qualityMode,
+      output_format: outputFormat,
+      tile_size: tileSize
+    };
+  }
+
+  return {
+    mode: "scale",
+    scale: scaleForTargetOption(targetOption),
+    target_long_edge_px: null,
+    quality_mode: qualityMode,
+    output_format: outputFormat,
+    tile_size: tileSize
+  };
+}
+
+function scaleForTargetOption(
+  targetOption: OutputTargetOption
+): UpscaleProcessingPlanInput["scale"] {
+  switch (targetOption) {
+    case "scale_2":
+      return 2;
+    case "scale_4":
+      return 4;
+    case "scale_8":
+      return 8;
+    case "scale_10":
+      return 10;
+    default:
+      return null;
+  }
+}
+
+function parseTileSize(value: string): UpscaleProcessingTileSize {
+  if (value === "auto") {
+    return "auto";
+  }
+  const numericValue = Number(value);
+  return numericValue === 64 ||
+    numericValue === 128 ||
+    numericValue === 256 ||
+    numericValue === 512
+    ? numericValue
+    : "auto";
+}
+
+function matchesLargeTarget(targetOption: OutputTargetOption) {
+  return (
+    targetOption === "scale_8" ||
+    targetOption === "scale_10" ||
+    targetOption === "target_8k" ||
+    targetOption === "custom_long_edge"
+  );
+}
+
+function isActiveJobRunning(job: UpscaleProcessingJobStatus) {
+  return (
+    job.status === "pending" ||
+    job.status === "running" ||
+    job.status === "cancel_requested"
+  );
+}
+
+function imageNameForJob(
+  job: UpscaleProcessingJobStatus,
+  items: UpscaleQueueItem[]
+) {
+  return (
+    items.find((item) => item.id === job.queue_item_id)?.original_name ??
+    job.queue_item_id
+  );
+}
+
+function qualityModeLabel(value: string) {
+  switch (value) {
+    case "safe":
+      return "Safe laptop mode";
+    case "balanced":
+      return "Balanced";
+    case "ultra":
+      return "Ultra quality";
+    default:
+      return value;
+  }
+}
+
+function elapsedJobTime(job: UpscaleProcessingJobStatus) {
+  if (!job.started_at) {
+    return "Not started";
+  }
+  const end = job.completed_at ? Date.parse(job.completed_at) : Date.now();
+  const started = Date.parse(job.started_at);
+  if (!Number.isFinite(started) || !Number.isFinite(end) || end < started) {
+    return "Not available";
+  }
+  const seconds = Math.floor((end - started) / 1000);
+  if (seconds < 60) {
+    return `${seconds}s`;
+  }
+  const minutes = Math.floor(seconds / 60);
+  const remainder = seconds % 60;
+  return `${minutes}m ${remainder}s`;
+}
+
 function buildImportNotice(
   result: ImageImportResult,
   queue: UpscaleQueueResponse
 ) {
   return `Last import selected ${result.summary.selected} file(s). ${result.summary.queued} queued. Current queue has ${queue.items.length} active item(s).`;
-}
-
-function buildBatchNotice(result: UpscaleProcessBatchResult) {
-  if (!result.ok) {
-    return `${result.message} Batch summary: ${result.attempted} attempted, ${result.completed} completed, ${result.failed} failed.`;
-  }
-
-  return `Batch summary: ${result.attempted} attempted, ${result.completed} completed, ${result.failed} failed.`;
 }
 
 function importNoticeVariant(result: ImageImportResult) {
@@ -1159,16 +1443,4 @@ function formatSize(sizeBytes: number | null) {
   }
 
   return `${(sizeBytes / (1024 * 1024)).toFixed(2)} MB`;
-}
-
-function formatDuration(durationMs: number | null) {
-  if (durationMs === null) {
-    return "Not available";
-  }
-
-  if (durationMs < 1000) {
-    return `${durationMs} ms`;
-  }
-
-  return `${(durationMs / 1000).toFixed(1)} s`;
 }

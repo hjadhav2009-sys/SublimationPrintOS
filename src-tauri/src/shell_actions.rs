@@ -45,6 +45,7 @@ const MANAGED_FOLDER_KEYS: &[(&str, &str)] = &[
     ("recovery", "Recovery"),
     ("recovery_snapshots", "Recovery Snapshots"),
     ("engine", "Real-ESRGAN Engine"),
+    ("upscaled", "Upscaled Images"),
     ("updates", "Updates"),
     ("updates_downloaded", "Downloaded Updates"),
     ("updates_staged", "Staged Updates"),
@@ -167,6 +168,12 @@ fn managed_folder_target(paths: &AppPaths, key: &str) -> Result<ManagedFolderTar
             "engine",
             "Real-ESRGAN Engine",
             engine_paths(paths).engine_dir,
+            true,
+        )),
+        "upscaled" => Ok(target(
+            "upscaled",
+            "Upscaled Images",
+            paths.app_data_dir.join("assets").join("upscaled"),
             true,
         )),
         "updates" => Ok(target(

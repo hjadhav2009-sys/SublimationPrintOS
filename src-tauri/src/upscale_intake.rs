@@ -205,14 +205,14 @@ pub fn remove_upscale_queue_item_for_paths(
             UPDATE upscale_queue_items
             SET status = 'removed',
                 updated_at = ?1
-            WHERE id = ?2 AND status = 'queued'
+            WHERE id = ?2 AND status IN ('queued', 'failed')
             ",
             params![updated_at, queue_item_id],
         )
         .map_err(|error| format!("Unable to remove queue item: {error}"))?;
 
     if changed == 0 {
-        return Err("Queue item was not found or is not queued".to_string());
+        return Err("Queue item was not found or is not queued or failed".to_string());
     }
 
     log_upscale_event(
