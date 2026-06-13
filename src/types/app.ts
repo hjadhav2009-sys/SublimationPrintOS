@@ -545,6 +545,8 @@ export interface UpscaleProcessingPlanInput {
   quality_mode: UpscaleProcessingQualityMode;
   output_format: "png" | "jpg" | "webp";
   tile_size: UpscaleProcessingTileSize;
+  preset_id: string | null;
+  preset_label: string | null;
 }
 
 export interface StartUpscaleProcessingJobResult {
@@ -578,6 +580,19 @@ export interface UpscaleProcessingJobStatus {
   target_label: string;
   quality_mode: string;
   tile_size: string;
+  preset_id: string | null;
+  preset_label: string | null;
+  resolved_tile_size: number;
+  pass_count: number;
+  source_width: number;
+  source_height: number;
+  target_width: number;
+  target_height: number;
+  target_megapixels: number;
+  size_category: string;
+  engine_pid: number | null;
+  cancel_requested_at: string | null;
+  cancelled_at: string | null;
 }
 
 export interface UpscaleInterruptedJobRepairResult {

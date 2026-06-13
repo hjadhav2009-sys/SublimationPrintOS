@@ -1,7 +1,7 @@
 use chrono::Utc;
 use rusqlite::{params, Connection};
 
-pub const CURRENT_SCHEMA_VERSION: i64 = 4;
+pub const CURRENT_SCHEMA_VERSION: i64 = 5;
 
 pub fn run_migrations(connection: &mut Connection) -> Result<i64, String> {
     ensure_migration_table(connection)?;
@@ -17,6 +17,9 @@ pub fn run_migrations(connection: &mut Connection) -> Result<i64, String> {
     }
     if !migration_applied(connection, 4)? {
         apply_upscale_processing_jobs_migration(connection)?;
+    }
+    if !migration_applied(connection, 5)? {
+        apply_upscale_processing_jobs_cancellation_migration(connection)?;
     }
 
     Ok(CURRENT_SCHEMA_VERSION)
@@ -337,6 +340,63 @@ fn apply_upscale_processing_jobs_migration(connection: &mut Connection) -> Resul
     transaction
         .commit()
         .map_err(|error| format!("Unable to commit upscale processing jobs migration: {error}"))
+}
+
+fn apply_upscale_processing_jobs_cancellation_migration(
+    connection: &mut Connection,
+) -> Result<(), String> {
+    let transaction = connection
+        .transaction()
+        .map_err(|error| format!("Unable to start migration transaction: {error}"))?;
+
+    let columns = [
+        ("engine_pid", "INTEGER"),
+        ("cancel_requested_at", "TEXT"),
+        ("cancelled_at", "TEXT"),
+    ];
+
+    for (column_name, column_type) in columns {
+        if !table_column_exists(&transaction, "upscale_processing_jobs", column_name)? {
+            let sql =
+                format!("ALTER TABLE upscale_processing_jobs ADD COLUMN {column_name} {column_type}");
+            transaction
+                .execute(&sql, [])
+                .map_err(|error| format!("Unable to add upscale job column {column_name}: {error}"))?;
+        }
+    }
+
+    let applied_at = Utc::now().to_rfc3339();
+    transaction
+        .execute(
+            "INSERT INTO schema_migrations (version, name, applied_at) VALUES (?1, ?2, ?3)",
+            params![5, "upscale processing cancellation", applied_at],
+        )
+        .map_err(|error| format!("Unable to record upscale cancellation migration: {error}"))?;
+
+    let metadata_json = serde_json::json!({
+        "version": 5,
+        "name": "upscale processing cancellation"
+    })
+    .to_string();
+
+    transaction
+        .execute(
+            "
+            INSERT INTO audit_logs (event_type, message, metadata_json, created_at)
+            VALUES (?1, ?2, ?3, ?4)
+            ",
+            params![
+                "migration_applied",
+                "Applied migration 5: upscale processing cancellation",
+                metadata_json,
+                Utc::now().to_rfc3339()
+            ],
+        )
+        .map_err(|error| format!("Unable to record migration audit log: {error}"))?;
+
+    transaction
+        .commit()
+        .map_err(|error| format!("Unable to commit upscale cancellation migration: {error}"))
 }
 
 fn table_column_exists(

@@ -168,6 +168,7 @@ fn main() {
             commands::start_upscale_processing_job,
             commands::get_upscale_processing_job,
             commands::get_active_upscale_processing_job,
+            commands::request_cancel_upscale_processing_job,
             commands::process_next_upscale_queue_item,
             commands::process_all_queued_upscale_items,
             commands::retry_failed_upscale_queue_item,

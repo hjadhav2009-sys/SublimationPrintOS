@@ -53,7 +53,7 @@ use crate::upscale_processing::{
     process_all_queued_upscale_items_for_paths, process_next_upscale_queue_item_for_paths,
     process_upscale_queue_item_for_paths, repair_interrupted_upscale_processing_job_for_paths,
     repair_missing_raw_queue_items_for_paths, repair_stale_processing_items_for_paths,
-    retry_failed_upscale_queue_item_for_paths,
+    request_cancel_upscale_processing_job_for_paths, retry_failed_upscale_queue_item_for_paths,
     start_upscale_processing_job_for_paths, StartUpscaleProcessingJobResult,
     UpscaleProcessBatchResult, UpscaleProcessItemResult, UpscaleProcessingJobStatus,
     UpscaleInterruptedJobRepairResult, UpscaleProcessingPlanInput, UpscaleProcessingStatus,
@@ -460,6 +460,16 @@ pub fn get_active_upscale_processing_job(
 ) -> Result<Option<UpscaleProcessingJobStatus>, String> {
     let (paths, _storage_summary, _schema_version) = ensure_foundation_ready(&app)?;
     get_active_upscale_processing_job_for_paths(&paths)
+}
+
+#[tauri::command]
+pub fn request_cancel_upscale_processing_job(
+    app: AppHandle,
+    job_id: String,
+    confirm: String,
+) -> Result<UpscaleProcessingJobStatus, String> {
+    let (paths, _storage_summary, _schema_version) = ensure_foundation_ready(&app)?;
+    request_cancel_upscale_processing_job_for_paths(&paths, job_id, confirm)
 }
 
 #[tauri::command]
