@@ -47,10 +47,12 @@ use crate::upscale_intake::{
     UpscaleQueueItem, UpscaleQueueResponse,
 };
 use crate::upscale_processing::{
-    get_upscale_processing_status_for_paths, process_all_queued_upscale_items_for_paths,
-    process_next_upscale_queue_item_for_paths, process_upscale_queue_item_for_paths,
+    get_upscale_processing_status_for_paths, get_upscale_queue_asset_health_for_paths,
+    process_all_queued_upscale_items_for_paths, process_next_upscale_queue_item_for_paths,
+    process_upscale_queue_item_for_paths, repair_missing_raw_queue_items_for_paths,
     repair_stale_processing_items_for_paths, retry_failed_upscale_queue_item_for_paths,
     UpscaleProcessBatchResult, UpscaleProcessItemResult, UpscaleProcessingStatus,
+    UpscaleQueueAssetHealth,
 };
 use serde::Serialize;
 use serde_json::Value;
@@ -458,6 +460,21 @@ pub fn retry_failed_upscale_queue_item(
 pub fn get_upscale_processing_status(app: AppHandle) -> Result<UpscaleProcessingStatus, String> {
     let (paths, _storage_summary, _schema_version) = ensure_foundation_ready(&app)?;
     get_upscale_processing_status_for_paths(&paths)
+}
+
+#[tauri::command]
+pub fn get_upscale_queue_asset_health(app: AppHandle) -> Result<UpscaleQueueAssetHealth, String> {
+    let (paths, _storage_summary, _schema_version) = ensure_foundation_ready(&app)?;
+    get_upscale_queue_asset_health_for_paths(&paths)
+}
+
+#[tauri::command]
+pub fn repair_missing_raw_queue_items(
+    app: AppHandle,
+    confirm: String,
+) -> Result<UpscaleQueueAssetHealth, String> {
+    let (paths, _storage_summary, _schema_version) = ensure_foundation_ready(&app)?;
+    repair_missing_raw_queue_items_for_paths(&paths, confirm)
 }
 
 #[tauri::command]

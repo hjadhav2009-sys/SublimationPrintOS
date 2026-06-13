@@ -528,6 +528,30 @@ export interface UpscaleProcessingStatus {
   message: string;
 }
 
+export type UpscaleQueueAssetHealthStatus =
+  | "healthy"
+  | "missing_raw"
+  | "invalid_path";
+
+export interface UpscaleQueueAssetHealthItem {
+  queue_item_id: string;
+  original_name: string;
+  status: UpscaleQueueStatus;
+  relative_path: string;
+  health: UpscaleQueueAssetHealthStatus;
+  message: string;
+}
+
+export interface UpscaleQueueAssetHealth {
+  ok: boolean;
+  checked: number;
+  healthy: number;
+  missing_raw: number;
+  invalid_path: number;
+  items: UpscaleQueueAssetHealthItem[];
+  message: string;
+}
+
 export interface UpdateManifest {
   package_id: string;
   app_name: string;

@@ -18,6 +18,11 @@ const PREVIEW_LIMIT: usize = 4000;
 const MAX_BATCH_LIMIT: i64 = 100;
 const ENGINE_NOT_READY_MESSAGE: &str =
     "Real-ESRGAN engine is not installed in the managed engine folder. Use Engine Setup below. Queue items were not changed.";
+const ENGINE_NOT_READY_BATCH_MESSAGE: &str = "Engine is not ready. Queue items were not changed.";
+const MISSING_RAW_MESSAGE: &str =
+    "Raw image copy is missing from AppData. Re-import the original image or remove this queue item.";
+const INVALID_RAW_PATH_MESSAGE: &str =
+    "Raw image path is not a safe AppData raw file.";
 static ID_COUNTER: AtomicU64 = AtomicU64::new(1);
 
 #[derive(Debug, Clone, Serialize)]
@@ -52,6 +57,27 @@ pub struct UpscaleProcessingStatus {
     pub completed: usize,
     pub failed: usize,
     pub removed: usize,
+    pub message: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct UpscaleQueueAssetHealthItem {
+    pub queue_item_id: String,
+    pub original_name: String,
+    pub status: String,
+    pub relative_path: String,
+    pub health: String,
+    pub message: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct UpscaleQueueAssetHealth {
+    pub ok: bool,
+    pub checked: usize,
+    pub healthy: usize,
+    pub missing_raw: usize,
+    pub invalid_path: usize,
+    pub items: Vec<UpscaleQueueAssetHealthItem>,
     pub message: String,
 }
 
@@ -91,6 +117,17 @@ struct CommandRunResult {
     timed_out: bool,
 }
 
+enum ProcessingPreflightError {
+    RawAssetUnavailable(String),
+    Other(String),
+}
+
+enum RawAssetHealth {
+    Healthy(PathBuf),
+    MissingRaw,
+    InvalidPath,
+}
+
 pub fn process_upscale_queue_item_for_paths(
     paths: &AppPaths,
     queue_item_id: String,
@@ -112,7 +149,7 @@ pub fn process_next_upscale_queue_item_for_paths(
             completed: 0,
             failed: 0,
             results: Vec::new(),
-            message: "No queued upscale items are waiting".to_string(),
+            message: "No ready images in queue.".to_string(),
         });
     };
 
@@ -123,14 +160,14 @@ pub fn process_next_upscale_queue_item_for_paths(
 
     let result = process_queue_item_with_engine(paths, &next_id, &engine)?;
     let completed = usize::from(result.status == "completed");
-    let failed = usize::from(result.status == "failed");
+    let failed = usize::from(result.status == "failed" || !result.ok);
 
     Ok(UpscaleProcessBatchResult {
         ok: result.ok,
         attempted: 1,
         completed,
         failed,
-        message: result.message.clone(),
+        message: batch_message_for_counts(1, completed, failed),
         results: vec![result],
     })
 }
@@ -172,7 +209,7 @@ pub fn process_all_queued_upscale_items_for_paths(
         let result = process_queue_item_with_engine(paths, &queue_item_id, &engine)?;
         if result.status == "completed" {
             completed += 1;
-        } else if result.status == "failed" {
+        } else if result.status == "failed" || !result.ok {
             failed += 1;
         }
         results.push(result);
@@ -180,13 +217,7 @@ pub fn process_all_queued_upscale_items_for_paths(
 
     let attempted = results.len();
     let ok = failed == 0;
-    let message = if attempted == 0 {
-        "No queued upscale items are waiting".to_string()
-    } else if ok {
-        format!("Processed {completed} queued upscale item(s)")
-    } else {
-        format!("Processed {attempted} queued upscale item(s): {completed} completed, {failed} failed")
-    };
+    let message = batch_message_for_counts(attempted, completed, failed);
 
     log_processing_event(
         paths,
@@ -273,6 +304,65 @@ pub fn get_upscale_processing_status_for_paths(
     processing_status(&connection)
 }
 
+pub fn get_upscale_queue_asset_health_for_paths(
+    paths: &AppPaths,
+) -> Result<UpscaleQueueAssetHealth, String> {
+    let connection = open_processing_connection(paths)?;
+    queue_asset_health(paths, &connection)
+}
+
+pub fn repair_missing_raw_queue_items_for_paths(
+    paths: &AppPaths,
+    confirm: String,
+) -> Result<UpscaleQueueAssetHealth, String> {
+    if confirm != "REPAIR_MISSING_RAW_QUEUE_ITEMS" {
+        return Err("Repair missing raw queue items confirmation did not match".to_string());
+    }
+
+    let connection = open_processing_connection(paths)?;
+    let items = queue_asset_health_items(paths, &connection, "q.status IN ('queued', 'failed')")?;
+    let now = Utc::now().to_rfc3339();
+    let mut changed = 0usize;
+
+    for item in items
+        .iter()
+        .filter(|item| item.health == "missing_raw" || item.health == "invalid_path")
+    {
+        changed += connection
+            .execute(
+                "
+                UPDATE upscale_queue_items
+                SET status = 'failed',
+                    output_file_asset_id = NULL,
+                    output_relative_path = NULL,
+                    processing_started_at = NULL,
+                    processing_completed_at = ?1,
+                    processing_duration_ms = NULL,
+                    processing_error = ?2,
+                    engine_command_preview = NULL,
+                    engine_stdout_preview = NULL,
+                    engine_stderr_preview = NULL,
+                    updated_at = ?1
+                WHERE id = ?3 AND status IN ('queued', 'failed')
+                ",
+                params![now, MISSING_RAW_MESSAGE, item.queue_item_id],
+            )
+            .map_err(|error| format!("Unable to mark missing raw queue item failed: {error}"))?;
+    }
+
+    log_processing_event(
+        paths,
+        if changed == 0 { "info" } else { "warn" },
+        "missing_raw_queue_items_repaired",
+        "Missing raw queue items marked failed",
+        serde_json::json!({
+            "items_marked_failed": changed
+        }),
+    )?;
+
+    queue_asset_health(paths, &connection)
+}
+
 pub fn repair_stale_processing_items_for_paths(
     paths: &AppPaths,
     confirm: String,
@@ -351,7 +441,12 @@ fn process_queue_item_with_engine(
 
     let preflight = match preflight_processing_item(paths, &item, engine) {
         Ok(preflight) => preflight,
-        Err(error) => return Ok(non_processing_result(&item.id, &item.status, &error)),
+        Err(ProcessingPreflightError::RawAssetUnavailable(error)) => {
+            return fail_queue_item_before_processing(paths, &connection, &item.id, &error);
+        }
+        Err(ProcessingPreflightError::Other(error)) => {
+            return Ok(non_processing_result(&item.id, &item.status, &error));
+        }
     };
 
     let started = Instant::now();
@@ -535,7 +630,7 @@ fn process_queue_item_after_marked_processing(
             output_file_asset_id: Some(output_file_asset_id),
             output_relative_path: Some(output_plan.relative_path),
             duration_ms: Some(duration_ms),
-            message: "Upscale processing completed".to_string(),
+            message: "Processed 1 image successfully.".to_string(),
             error: None,
             stdout_preview: run_result.stdout_preview,
             stderr_preview: run_result.stderr_preview,
@@ -575,6 +670,59 @@ fn process_queue_item_after_marked_processing(
             &error,
         )
     }
+}
+
+fn fail_queue_item_before_processing(
+    paths: &AppPaths,
+    connection: &Connection,
+    queue_item_id: &str,
+    error: &str,
+) -> Result<UpscaleProcessItemResult, String> {
+    let completed_at = Utc::now().to_rfc3339();
+    connection
+        .execute(
+            "
+            UPDATE upscale_queue_items
+            SET status = 'failed',
+                output_file_asset_id = NULL,
+                output_relative_path = NULL,
+                processing_started_at = NULL,
+                processing_completed_at = ?1,
+                processing_duration_ms = NULL,
+                processing_error = ?2,
+                engine_command_preview = NULL,
+                engine_stdout_preview = NULL,
+                engine_stderr_preview = NULL,
+                updated_at = ?1
+            WHERE id = ?3 AND status IN ('queued', 'failed')
+            ",
+            params![completed_at, error, queue_item_id],
+        )
+        .map_err(|update_error| format!("Unable to mark queue item failed: {update_error}"))?;
+
+    log_processing_event(
+        paths,
+        "warn",
+        "upscale_raw_asset_missing",
+        "Upscale raw asset missing",
+        serde_json::json!({
+            "queue_item_id": queue_item_id,
+            "error": error
+        }),
+    )?;
+
+    Ok(UpscaleProcessItemResult {
+        ok: false,
+        queue_item_id: queue_item_id.to_string(),
+        status: "failed".to_string(),
+        output_file_asset_id: None,
+        output_relative_path: None,
+        duration_ms: None,
+        message: error.to_string(),
+        error: Some(error.to_string()),
+        stdout_preview: String::new(),
+        stderr_preview: String::new(),
+    })
 }
 
 fn fail_processing_item(
@@ -646,22 +794,25 @@ fn preflight_processing_item(
     paths: &AppPaths,
     item: &ProcessingQueueItem,
     engine: &EngineRuntimePaths,
-) -> Result<ProcessingPreflight, String> {
-    validate_output_format(&item.desired_output_format)?;
-    validate_scale_factor(item.desired_scale_factor)?;
+) -> Result<ProcessingPreflight, ProcessingPreflightError> {
+    validate_output_format(&item.desired_output_format).map_err(ProcessingPreflightError::Other)?;
+    validate_scale_factor(item.desired_scale_factor).map_err(ProcessingPreflightError::Other)?;
     if item.raw_asset_type != "raw_image" {
-        return Err("Queue item does not reference a raw image asset".to_string());
+        return Err(ProcessingPreflightError::Other(
+            "Queue item does not reference a raw image asset".to_string(),
+        ));
     }
 
-    let raw_root = ensure_assets_subdir(paths, "raw", "Raw assets folder")?;
-    let raw_path = resolve_managed_relative_path(
-        paths,
-        &raw_root,
-        &item.raw_relative_path,
-        "assets/raw",
-        "Raw image asset path",
-    )?;
-    ensure_regular_file_metadata(&raw_path, "Raw image asset")?;
+    let raw_path = match inspect_raw_asset_path(paths, &item.raw_relative_path) {
+        RawAssetHealth::Healthy(path) => path,
+        RawAssetHealth::MissingRaw | RawAssetHealth::InvalidPath => {
+            return Err(ProcessingPreflightError::RawAssetUnavailable(
+                MISSING_RAW_MESSAGE.to_string(),
+            ));
+        }
+    };
+    ensure_regular_file_metadata(&raw_path, "Raw image asset")
+        .map_err(ProcessingPreflightError::Other)?;
 
     Ok(ProcessingPreflight {
         raw_path,
@@ -746,7 +897,209 @@ fn engine_not_ready_batch_result(message: String) -> UpscaleProcessBatchResult {
         completed: 0,
         failed: 0,
         results: Vec::new(),
+        message: if message == ENGINE_NOT_READY_MESSAGE {
+            ENGINE_NOT_READY_BATCH_MESSAGE.to_string()
+        } else {
+            message
+        },
+    }
+}
+
+fn batch_message_for_counts(attempted: usize, completed: usize, failed: usize) -> String {
+    if attempted == 0 {
+        "No ready images in queue.".to_string()
+    } else if failed == 0 && completed == 1 {
+        "Processed 1 image successfully.".to_string()
+    } else if failed == 0 {
+        format!("Processed {completed} images successfully.")
+    } else {
+        format!("Batch summary: {attempted} attempted, {completed} completed, {failed} failed.")
+    }
+}
+
+fn queue_asset_health(
+    paths: &AppPaths,
+    connection: &Connection,
+) -> Result<UpscaleQueueAssetHealth, String> {
+    let items = queue_asset_health_items(paths, connection, "q.status != 'removed'")?;
+    Ok(queue_asset_health_from_items(items))
+}
+
+fn queue_asset_health_items(
+    paths: &AppPaths,
+    connection: &Connection,
+    where_clause: &str,
+) -> Result<Vec<UpscaleQueueAssetHealthItem>, String> {
+    let sql = format!(
+        "
+        SELECT
+            q.id,
+            f.original_name,
+            q.status,
+            f.relative_path
+        FROM upscale_queue_items q
+        JOIN file_assets f ON f.id = q.file_asset_id
+        WHERE {where_clause}
+        ORDER BY q.created_at ASC
+        "
+    );
+    let mut statement = connection
+        .prepare(&sql)
+        .map_err(|error| format!("Unable to prepare queue asset health query: {error}"))?;
+    let rows = statement
+        .query_map([], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, String>(2)?,
+                row.get::<_, String>(3)?,
+            ))
+        })
+        .map_err(|error| format!("Unable to query queue asset health: {error}"))?;
+
+    let mut items = Vec::new();
+    for row in rows {
+        let (queue_item_id, original_name, status, relative_path) =
+            row.map_err(|error| format!("Unable to read queue asset health row: {error}"))?;
+        let health = inspect_raw_asset_path(paths, &relative_path);
+        let (health, message) = raw_asset_health_details(&health);
+        items.push(UpscaleQueueAssetHealthItem {
+            queue_item_id,
+            original_name,
+            status,
+            relative_path,
+            health: health.to_string(),
+            message: message.to_string(),
+        });
+    }
+
+    Ok(items)
+}
+
+fn queue_asset_health_from_items(items: Vec<UpscaleQueueAssetHealthItem>) -> UpscaleQueueAssetHealth {
+    let checked = items.len();
+    let healthy = items.iter().filter(|item| item.health == "healthy").count();
+    let missing_raw = items
+        .iter()
+        .filter(|item| item.health == "missing_raw")
+        .count();
+    let invalid_path = items
+        .iter()
+        .filter(|item| item.health == "invalid_path")
+        .count();
+    let ok = missing_raw == 0 && invalid_path == 0;
+    let message = if ok {
+        "Queue files are healthy.".to_string()
+    } else {
+        format!(
+            "Queue file check found {missing_raw} missing raw and {invalid_path} invalid path item(s)."
+        )
+    };
+
+    UpscaleQueueAssetHealth {
+        ok,
+        checked,
+        healthy,
+        missing_raw,
+        invalid_path,
+        items,
         message,
+    }
+}
+
+fn inspect_raw_asset_path(paths: &AppPaths, relative_path: &str) -> RawAssetHealth {
+    inspect_raw_asset_path_result(paths, relative_path).unwrap_or(RawAssetHealth::InvalidPath)
+}
+
+fn inspect_raw_asset_path_result(
+    paths: &AppPaths,
+    relative_path: &str,
+) -> Result<RawAssetHealth, String> {
+    let relative_path = match validated_relative_path(
+        relative_path,
+        "assets/raw",
+        "Raw image asset path",
+    ) {
+        Ok(value) => value,
+        Err(_) => return Ok(RawAssetHealth::InvalidPath),
+    };
+    let relative_root = platform_relative_path("assets/raw")?;
+    let raw_relative_path = match relative_path.strip_prefix(&relative_root) {
+        Ok(value) if !value.as_os_str().is_empty() => value,
+        _ => return Ok(RawAssetHealth::InvalidPath),
+    };
+
+    let raw_root = paths.app_data_dir.join("assets").join("raw");
+    let resolved_path = raw_root.join(raw_relative_path);
+    if resolved_path != paths.app_data_dir.join(&relative_path) {
+        return Ok(RawAssetHealth::InvalidPath);
+    }
+
+    match fs::symlink_metadata(&raw_root) {
+        Ok(metadata) if metadata.file_type().is_symlink() || !metadata.is_dir() => {
+            return Ok(RawAssetHealth::InvalidPath);
+        }
+        Ok(_) => {}
+        Err(error) if error.kind() == ErrorKind::NotFound => {
+            return Ok(RawAssetHealth::MissingRaw);
+        }
+        Err(_) => return Ok(RawAssetHealth::InvalidPath),
+    }
+
+    match fs::symlink_metadata(&resolved_path) {
+        Ok(metadata) => {
+            let file_type = metadata.file_type();
+            if file_type.is_symlink() || !file_type.is_file() {
+                return Ok(RawAssetHealth::InvalidPath);
+            }
+            ensure_existing_path_inside(&raw_root, &resolved_path, "Raw image asset")
+                .map_err(|_| INVALID_RAW_PATH_MESSAGE.to_string())?;
+            Ok(RawAssetHealth::Healthy(resolved_path))
+        }
+        Err(error) if error.kind() == ErrorKind::NotFound => {
+            if missing_raw_path_ancestors_are_safe(&raw_root, &resolved_path) {
+                Ok(RawAssetHealth::MissingRaw)
+            } else {
+                Ok(RawAssetHealth::InvalidPath)
+            }
+        }
+        Err(_) => Ok(RawAssetHealth::InvalidPath),
+    }
+}
+
+fn missing_raw_path_ancestors_are_safe(raw_root: &Path, missing_path: &Path) -> bool {
+    let Some(mut current) = missing_path.parent() else {
+        return false;
+    };
+
+    while current != raw_root {
+        if !current.starts_with(raw_root) {
+            return false;
+        }
+
+        match fs::symlink_metadata(current) {
+            Ok(metadata) if metadata.file_type().is_symlink() || !metadata.is_dir() => {
+                return false;
+            }
+            Ok(_) => {}
+            Err(error) if error.kind() == ErrorKind::NotFound => {}
+            Err(_) => return false,
+        }
+
+        let Some(parent) = current.parent() else {
+            return false;
+        };
+        current = parent;
+    }
+
+    true
+}
+
+fn raw_asset_health_details(health: &RawAssetHealth) -> (&'static str, &'static str) {
+    match health {
+        RawAssetHealth::Healthy(_) => ("healthy", "Raw image copy is present."),
+        RawAssetHealth::MissingRaw => ("missing_raw", MISSING_RAW_MESSAGE),
+        RawAssetHealth::InvalidPath => ("invalid_path", INVALID_RAW_PATH_MESSAGE),
     }
 }
 
@@ -952,30 +1305,6 @@ fn ensure_assets_subdir(paths: &AppPaths, name: &str, label: &str) -> Result<Pat
     ensure_directory_exists_without_symlink(&target, label)?;
     ensure_existing_path_inside(&assets_dir, &target, label)?;
     Ok(target)
-}
-
-fn resolve_managed_relative_path(
-    paths: &AppPaths,
-    managed_root: &Path,
-    relative_path: &str,
-    expected_prefix: &str,
-    label: &str,
-) -> Result<PathBuf, String> {
-    let relative_path = validated_relative_path(relative_path, expected_prefix, label)?;
-    let relative_root = platform_relative_path(expected_prefix)?;
-    let managed_relative_path = relative_path
-        .strip_prefix(&relative_root)
-        .map_err(|_| format!("{label} resolved outside managed folder and was blocked"))?;
-    if managed_relative_path.as_os_str().is_empty() {
-        return Err(format!("{label} resolved outside managed folder and was blocked"));
-    }
-
-    let resolved_path = managed_root.join(managed_relative_path);
-    if resolved_path != paths.app_data_dir.join(&relative_path) {
-        return Err(format!("{label} resolved outside AppData and was blocked"));
-    }
-    ensure_existing_path_inside(managed_root, &resolved_path, label)?;
-    Ok(resolved_path)
 }
 
 fn resolve_output_relative_path(

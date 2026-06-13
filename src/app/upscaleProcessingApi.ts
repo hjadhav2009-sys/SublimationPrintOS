@@ -3,6 +3,9 @@ import type {
   UpscaleProcessBatchResult,
   UpscaleProcessItemResult,
   UpscaleProcessingStatus,
+  UpscaleQueueAssetHealth,
+  UpscaleQueueAssetHealthItem,
+  UpscaleQueueAssetHealthStatus,
   UpscaleQueueStatus
 } from "../types/app";
 
@@ -45,6 +48,21 @@ export async function getUpscaleProcessingStatus(): Promise<UpscaleProcessingSta
   return invokeChecked(
     "get_upscale_processing_status",
     isUpscaleProcessingStatus
+  );
+}
+
+export async function getUpscaleQueueAssetHealth(): Promise<UpscaleQueueAssetHealth> {
+  return invokeChecked(
+    "get_upscale_queue_asset_health",
+    isUpscaleQueueAssetHealth
+  );
+}
+
+export async function repairMissingRawQueueItems(): Promise<UpscaleQueueAssetHealth> {
+  return invokeChecked(
+    "repair_missing_raw_queue_items",
+    isUpscaleQueueAssetHealth,
+    { confirm: "REPAIR_MISSING_RAW_QUEUE_ITEMS" }
   );
 }
 
@@ -102,6 +120,12 @@ function isQueueStatus(value: unknown): value is UpscaleQueueStatus {
   );
 }
 
+function isQueueAssetHealthStatus(
+  value: unknown
+): value is UpscaleQueueAssetHealthStatus {
+  return value === "healthy" || value === "missing_raw" || value === "invalid_path";
+}
+
 function isUpscaleProcessItemResult(
   value: unknown
 ): value is UpscaleProcessItemResult {
@@ -155,6 +179,42 @@ function isUpscaleProcessingStatus(
     isNumber(value.completed) &&
     isNumber(value.failed) &&
     isNumber(value.removed) &&
+    isString(value.message)
+  );
+}
+
+function isUpscaleQueueAssetHealthItem(
+  value: unknown
+): value is UpscaleQueueAssetHealthItem {
+  if (!isRecord(value)) {
+    return false;
+  }
+
+  return (
+    isString(value.queue_item_id) &&
+    isString(value.original_name) &&
+    isQueueStatus(value.status) &&
+    isString(value.relative_path) &&
+    isQueueAssetHealthStatus(value.health) &&
+    isString(value.message)
+  );
+}
+
+function isUpscaleQueueAssetHealth(
+  value: unknown
+): value is UpscaleQueueAssetHealth {
+  if (!isRecord(value)) {
+    return false;
+  }
+
+  return (
+    isBoolean(value.ok) &&
+    isNumber(value.checked) &&
+    isNumber(value.healthy) &&
+    isNumber(value.missing_raw) &&
+    isNumber(value.invalid_path) &&
+    Array.isArray(value.items) &&
+    value.items.every(isUpscaleQueueAssetHealthItem) &&
     isString(value.message)
   );
 }

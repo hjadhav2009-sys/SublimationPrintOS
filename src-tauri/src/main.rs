@@ -169,6 +169,8 @@ fn main() {
             commands::process_all_queued_upscale_items,
             commands::retry_failed_upscale_queue_item,
             commands::get_upscale_processing_status,
+            commands::get_upscale_queue_asset_health,
+            commands::repair_missing_raw_queue_items,
             commands::repair_stale_processing_items
         ])
         .run(tauri::generate_context!())
