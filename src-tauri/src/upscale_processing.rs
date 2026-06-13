@@ -694,6 +694,7 @@ fn ensure_realesrgan_engine_ready(paths: &AppPaths) -> Result<EngineRuntimePaths
             &engine.models_dir,
             "Real-ESRGAN models folder",
         )?;
+        ensure_realesrgan_model_files_ready(&engine.models_dir)?;
 
         Ok(EngineRuntimePaths {
             engine_dir: engine.engine_dir,
@@ -702,6 +703,40 @@ fn ensure_realesrgan_engine_ready(paths: &AppPaths) -> Result<EngineRuntimePaths
     }();
 
     result.map_err(|_| ENGINE_NOT_READY_MESSAGE.to_string())
+}
+
+fn ensure_realesrgan_model_files_ready(models_dir: &Path) -> Result<(), String> {
+    let mut has_param_file = false;
+    let mut has_bin_file = false;
+
+    let entries = fs::read_dir(models_dir).map_err(|_| ENGINE_NOT_READY_MESSAGE.to_string())?;
+    for entry in entries {
+        let entry = entry.map_err(|_| ENGINE_NOT_READY_MESSAGE.to_string())?;
+        let path = entry.path();
+        let metadata =
+            fs::symlink_metadata(&path).map_err(|_| ENGINE_NOT_READY_MESSAGE.to_string())?;
+        let file_type = metadata.file_type();
+        if file_type.is_symlink() || !file_type.is_file() {
+            continue;
+        }
+
+        match path
+            .extension()
+            .and_then(|extension| extension.to_str())
+            .map(|extension| extension.to_lowercase())
+            .as_deref()
+        {
+            Some("param") => has_param_file = true,
+            Some("bin") => has_bin_file = true,
+            _ => {}
+        }
+    }
+
+    if has_param_file && has_bin_file {
+        Ok(())
+    } else {
+        Err(ENGINE_NOT_READY_MESSAGE.to_string())
+    }
 }
 
 fn engine_not_ready_batch_result(message: String) -> UpscaleProcessBatchResult {

@@ -371,6 +371,8 @@ export interface EngineModelStatus {
   models_dir_exists: boolean;
   models_dir: string;
   model_files_count: number;
+  has_param_file: boolean;
+  has_bin_file: boolean;
   sample_files: string[];
 }
 
