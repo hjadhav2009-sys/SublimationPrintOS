@@ -12,6 +12,7 @@ import {
   getUpscaleProcessingStatus,
   getUpscaleProcessingJob,
   getUpscaleQueueAssetHealth,
+  repairInterruptedUpscaleProcessingJob,
   repairMissingRawQueueItems,
   repairStaleProcessingItems,
   startUpscaleProcessingJob
@@ -371,6 +372,37 @@ export function UpscaleTestPage() {
     }
   };
 
+  const handleRepairInterruptedJob = async () => {
+    if (!activeJob || !isActiveJobRunning(activeJob)) {
+      return;
+    }
+
+    const confirmed = window.confirm(
+      "Use this only if the app was closed, frozen, or the job is no longer actually running. This will unlock processing."
+    );
+    if (!confirmed) {
+      return;
+    }
+
+    setIsProcessingBusy(true);
+    setProcessingError(null);
+    setProcessingMessage(null);
+
+    try {
+      const jobId = activeJob.job_id;
+      const result = await repairInterruptedUpscaleProcessingJob();
+      const repairedJob = await getUpscaleProcessingJob(jobId);
+      setActiveJob(repairedJob);
+      setProcessingMessageVariant(result.repaired_jobs > 0 ? "warning" : "success");
+      setProcessingMessage(result.message);
+      await refreshQueue(result.message);
+    } catch (error: unknown) {
+      setProcessingError(commandErrorMessage(error));
+    } finally {
+      setIsProcessingBusy(false);
+    }
+  };
+
   const handleDiscover = async () => {
     setIsEngineBusy(true);
     setEngineErrorMessage(null);
@@ -460,6 +492,7 @@ export function UpscaleTestPage() {
   const hasQueueHealthIssue =
     (assetHealth?.missing_raw ?? 0) > 0 || (assetHealth?.invalid_path ?? 0) > 0;
   const activeItems = queueResponse?.items ?? [];
+  const jobIsActive = Boolean(activeJob && isActiveJobRunning(activeJob));
 
   return (
     <section className="page">
@@ -499,14 +532,14 @@ export function UpscaleTestPage() {
       >
         <div className="settings-actions">
           <Button
-            disabled={isQueueBusy}
+            disabled={isQueueBusy || jobIsActive}
             onClick={() => void handleImportImages()}
             variant="primary"
           >
             Import Images
           </Button>
           <Button
-            disabled={isQueueBusy}
+            disabled={isQueueBusy || jobIsActive}
             onClick={() => void handleImportFolder()}
             variant="secondary"
           >
@@ -588,7 +621,7 @@ export function UpscaleTestPage() {
             Check Queue Files
           </Button>
           <Button
-            disabled={isHealthBusy || !hasQueueHealthIssue}
+            disabled={isHealthBusy || jobIsActive || !hasQueueHealthIssue}
             onClick={() => void handleRepairMissingRaw()}
             variant="secondary"
           >
@@ -631,7 +664,7 @@ export function UpscaleTestPage() {
         <p>Completed images are saved in AppData/assets/upscaled/YYYYMMDD.</p>
         <div className="settings-actions worker-primary-actions">
           <Button
-            disabled={isQueueBusy || !queueResponse?.summary.total}
+            disabled={isQueueBusy || jobIsActive || !queueResponse?.summary.total}
             onClick={() => void handleStartFreshQueue()}
             variant="ghost"
           >
@@ -679,11 +712,12 @@ export function UpscaleTestPage() {
             job={activeJob}
             imageName={imageNameForJob(activeJob, activeItems)}
             onOpenUpscaledFolder={handleOpenUpscaledFolder}
+            onRepairInterruptedJob={handleRepairInterruptedJob}
           />
         ) : null}
         <div className="settings-actions secondary-actions">
           <Button
-            disabled={isProcessingBusy || !processingStatus?.processing}
+            disabled={isProcessingBusy || jobIsActive || !processingStatus?.processing}
             onClick={() => void handleRepairStaleProcessing()}
             variant="ghost"
           >
@@ -701,7 +735,7 @@ export function UpscaleTestPage() {
                 key={item.id}
                 onStartProcessing={handleStartProcessingJob}
                 onRemove={handleRemoveQueueItem}
-                processingLocked={Boolean(activeJob && isActiveJobRunning(activeJob))}
+                processingLocked={jobIsActive}
               />
             ))}
           </div>
@@ -810,12 +844,16 @@ type OutputTargetOption =
 function ActiveJobCard({
   imageName,
   job,
-  onOpenUpscaledFolder
+  onOpenUpscaledFolder,
+  onRepairInterruptedJob
 }: {
   imageName: string;
   job: UpscaleProcessingJobStatus;
   onOpenUpscaledFolder: () => Promise<void>;
+  onRepairInterruptedJob: () => Promise<void>;
 }) {
+  const canRepair = isActiveJobRunning(job);
+
   return (
     <div className="active-job-card">
       <div className="queue-card-header">
@@ -838,6 +876,13 @@ function ActiveJobCard({
           value={job.output_relative_path ?? "Not created yet"}
         />
       </div>
+      {canRepair ? (
+        <div className="notice notice-warning">
+          Large jobs may take time. If Windows was closed or the app was
+          restarted while this job was running, use Mark Interrupted Job as
+          Failed.
+        </div>
+      ) : null}
       {job.error ? <div className="notice notice-warning">{job.error}</div> : null}
       {job.output_relative_path ? (
         <div className="notice notice-success">
@@ -848,6 +893,14 @@ function ActiveJobCard({
         <Button onClick={() => void onOpenUpscaledFolder()} variant="secondary">
           Open Upscaled Folder
         </Button>
+        {canRepair ? (
+          <Button
+            onClick={() => void onRepairInterruptedJob()}
+            variant="ghost"
+          >
+            Mark Interrupted Job as Failed
+          </Button>
+        ) : null}
       </div>
     </div>
   );
@@ -872,7 +925,7 @@ function QueueItemCard({
   processingLocked: boolean;
 }) {
   const [targetOption, setTargetOption] =
-    useState<OutputTargetOption>("scale_4");
+    useState<OutputTargetOption>("scale_2");
   const [customLongEdge, setCustomLongEdge] = useState(7680);
   const [qualityMode, setQualityMode] =
     useState<UpscaleProcessingQualityMode>("safe");

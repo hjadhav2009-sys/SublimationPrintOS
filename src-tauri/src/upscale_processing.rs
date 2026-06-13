@@ -26,6 +26,8 @@ const MISSING_RAW_MESSAGE: &str =
     "Raw image copy is missing from AppData. Re-import the original image or remove this queue item.";
 const INVALID_RAW_PATH_MESSAGE: &str =
     "Raw image path is not a safe AppData raw file.";
+const INTERRUPTED_JOB_MESSAGE: &str =
+    "Processing was interrupted before completion. Start the image again.";
 static ID_COUNTER: AtomicU64 = AtomicU64::new(1);
 
 #[derive(Debug, Clone, Serialize)]
@@ -120,6 +122,14 @@ pub struct UpscaleProcessingJobStatus {
     pub target_label: String,
     pub quality_mode: String,
     pub tile_size: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct UpscaleInterruptedJobRepairResult {
+    pub ok: bool,
+    pub repaired_jobs: usize,
+    pub repaired_queue_items: usize,
+    pub message: String,
 }
 
 #[derive(Debug, Clone)]
@@ -540,6 +550,96 @@ pub fn repair_missing_raw_queue_items_for_paths(
     )?;
 
     queue_asset_health(paths, &connection)
+}
+
+pub fn repair_interrupted_upscale_processing_job_for_paths(
+    paths: &AppPaths,
+    confirm: String,
+) -> Result<UpscaleInterruptedJobRepairResult, String> {
+    if confirm != "REPAIR_INTERRUPTED_UPSCALE_JOB" {
+        return Err("Repair interrupted upscale job confirmation did not match".to_string());
+    }
+
+    let connection = open_processing_connection(paths)?;
+    let mut statement = connection
+        .prepare(
+            "
+            SELECT id, queue_item_id
+            FROM upscale_processing_jobs
+            WHERE status IN ('pending', 'running', 'cancel_requested')
+            ORDER BY created_at ASC
+            ",
+        )
+        .map_err(|error| format!("Unable to prepare interrupted job query: {error}"))?;
+    let rows = statement
+        .query_map([], |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)))
+        .map_err(|error| format!("Unable to query interrupted jobs: {error}"))?;
+
+    let mut jobs = Vec::new();
+    for row in rows {
+        jobs.push(row.map_err(|error| format!("Unable to read interrupted job row: {error}"))?);
+    }
+    drop(statement);
+
+    let now = Utc::now().to_rfc3339();
+    let mut repaired_jobs = 0usize;
+    let mut repaired_queue_items = 0usize;
+
+    for (job_id, queue_item_id) in jobs {
+        repaired_jobs += connection
+            .execute(
+                "
+                UPDATE upscale_processing_jobs
+                SET status = 'failed',
+                    stage = 'interrupted',
+                    progress_label = 'Job was marked interrupted',
+                    error_message = ?1,
+                    completed_at = ?2,
+                    updated_at = ?2
+                WHERE id = ?3 AND status IN ('pending', 'running', 'cancel_requested')
+                ",
+                params![INTERRUPTED_JOB_MESSAGE, now, job_id],
+            )
+            .map_err(|error| format!("Unable to repair interrupted upscale job: {error}"))?;
+
+        repaired_queue_items += connection
+            .execute(
+                "
+                UPDATE upscale_queue_items
+                SET status = 'failed',
+                    processing_error = ?1,
+                    processing_completed_at = ?2,
+                    updated_at = ?2
+                WHERE id = ?3 AND status = 'processing'
+                ",
+                params![INTERRUPTED_JOB_MESSAGE, now, queue_item_id],
+            )
+            .map_err(|error| {
+                format!("Unable to repair queue item for interrupted upscale job: {error}")
+            })?;
+    }
+
+    log_processing_event(
+        paths,
+        if repaired_jobs > 0 { "warn" } else { "info" },
+        "interrupted_upscale_job_repaired",
+        "Interrupted upscale processing job repair checked",
+        serde_json::json!({
+            "repaired_jobs": repaired_jobs,
+            "repaired_queue_items": repaired_queue_items
+        }),
+    )?;
+
+    Ok(UpscaleInterruptedJobRepairResult {
+        ok: true,
+        repaired_jobs,
+        repaired_queue_items,
+        message: if repaired_jobs > 0 {
+            "Interrupted processing job repaired. You can start processing again.".to_string()
+        } else {
+            "No interrupted processing job was found.".to_string()
+        },
+    })
 }
 
 pub fn repair_stale_processing_items_for_paths(

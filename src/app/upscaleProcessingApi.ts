@@ -1,6 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import type {
   StartUpscaleProcessingJobResult,
+  UpscaleInterruptedJobRepairResult,
   UpscaleProcessBatchResult,
   UpscaleProcessItemResult,
   UpscaleProcessingJobState,
@@ -95,6 +96,14 @@ export async function repairMissingRawQueueItems(): Promise<UpscaleQueueAssetHea
     "repair_missing_raw_queue_items",
     isUpscaleQueueAssetHealth,
     { confirm: "REPAIR_MISSING_RAW_QUEUE_ITEMS" }
+  );
+}
+
+export async function repairInterruptedUpscaleProcessingJob(): Promise<UpscaleInterruptedJobRepairResult> {
+  return invokeChecked(
+    "repair_interrupted_upscale_processing_job",
+    isUpscaleInterruptedJobRepairResult,
+    { confirm: "REPAIR_INTERRUPTED_UPSCALE_JOB" }
   );
 }
 
@@ -207,6 +216,21 @@ function isUpscaleProcessingJobStatus(
     isString(value.target_label) &&
     isString(value.quality_mode) &&
     isString(value.tile_size)
+  );
+}
+
+function isUpscaleInterruptedJobRepairResult(
+  value: unknown
+): value is UpscaleInterruptedJobRepairResult {
+  if (!isRecord(value)) {
+    return false;
+  }
+
+  return (
+    isBoolean(value.ok) &&
+    isNumber(value.repaired_jobs) &&
+    isNumber(value.repaired_queue_items) &&
+    isString(value.message)
   );
 }
 

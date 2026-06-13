@@ -580,6 +580,13 @@ export interface UpscaleProcessingJobStatus {
   tile_size: string;
 }
 
+export interface UpscaleInterruptedJobRepairResult {
+  ok: boolean;
+  repaired_jobs: number;
+  repaired_queue_items: number;
+  message: string;
+}
+
 export type UpscaleQueueAssetHealthStatus =
   | "healthy"
   | "missing_raw"
