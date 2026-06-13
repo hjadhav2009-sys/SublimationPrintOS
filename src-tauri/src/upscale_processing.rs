@@ -28,6 +28,9 @@ const INVALID_RAW_PATH_MESSAGE: &str =
     "Raw image path is not a safe AppData raw file.";
 const INTERRUPTED_JOB_MESSAGE: &str =
     "Processing was interrupted before completion. Start the image again.";
+const CANCELLED_PROCESSING_MESSAGE: &str = "Processing was cancelled by user.";
+const PROCESSING_TIMEOUT_MESSAGE: &str =
+    "Processing timed out after 10 minutes. Try Production Fast, smaller target, or Large Output Safe.";
 static ID_COUNTER: AtomicU64 = AtomicU64::new(1);
 
 #[derive(Debug, Clone, Serialize)]
@@ -94,6 +97,8 @@ pub struct UpscaleProcessingPlanInput {
     pub quality_mode: String,
     pub output_format: String,
     pub tile_size: serde_json::Value,
+    pub preset_id: Option<String>,
+    pub preset_label: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -122,6 +127,19 @@ pub struct UpscaleProcessingJobStatus {
     pub target_label: String,
     pub quality_mode: String,
     pub tile_size: String,
+    pub preset_id: Option<String>,
+    pub preset_label: Option<String>,
+    pub resolved_tile_size: i64,
+    pub pass_count: usize,
+    pub source_width: u32,
+    pub source_height: u32,
+    pub target_width: u32,
+    pub target_height: u32,
+    pub target_megapixels: f64,
+    pub size_category: String,
+    pub engine_pid: Option<i64>,
+    pub cancel_requested_at: Option<String>,
+    pub cancelled_at: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -167,6 +185,12 @@ struct CommandRunResult {
     stdout_preview: String,
     stderr_preview: String,
     timed_out: bool,
+    cancelled: bool,
+}
+
+struct CommandCancelContext<'a> {
+    paths: &'a AppPaths,
+    job_id: &'a str,
 }
 
 enum ProcessingPreflightError {
@@ -188,12 +212,18 @@ struct ImageDimensions {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct PlannedUpscaleJob {
+    preset_id: Option<String>,
+    preset_label: Option<String>,
     mode: String,
     target_label: String,
     quality_mode: String,
     output_format: String,
     tile_size_label: String,
     tile_size: i64,
+    #[serde(default)]
+    resolved_tile_size: i64,
+    #[serde(default)]
+    pass_count: usize,
     source_width: u32,
     source_height: u32,
     target_width: u32,
@@ -322,6 +352,52 @@ pub fn get_active_upscale_processing_job_for_paths(
 ) -> Result<Option<UpscaleProcessingJobStatus>, String> {
     let connection = open_processing_connection(paths)?;
     active_upscale_processing_job(&connection)
+}
+
+pub fn request_cancel_upscale_processing_job_for_paths(
+    paths: &AppPaths,
+    job_id: String,
+    confirm: String,
+) -> Result<UpscaleProcessingJobStatus, String> {
+    if confirm != "CANCEL_UPSCALE_PROCESSING_JOB" {
+        return Err("Cancel upscale processing job confirmation did not match".to_string());
+    }
+
+    let job_id = validate_id("job_id", &job_id)?;
+    let connection = open_processing_connection(paths)?;
+    let now = Utc::now().to_rfc3339();
+    let changed = connection
+        .execute(
+            "
+            UPDATE upscale_processing_jobs
+            SET status = 'cancel_requested',
+                stage = 'cancel_requested',
+                progress_label = 'Stopping processing safely',
+                cancel_requested_at = COALESCE(cancel_requested_at, ?1),
+                updated_at = ?1
+            WHERE id = ?2 AND status IN ('pending', 'running', 'cancel_requested')
+            ",
+            params![now, job_id],
+        )
+        .map_err(|error| format!("Unable to request upscale job cancellation: {error}"))?;
+
+    if changed == 0 {
+        let existing = connection
+            .query_row(
+                "SELECT status FROM upscale_processing_jobs WHERE id = ?1",
+                params![job_id],
+                |row| row.get::<_, String>(0),
+            )
+            .optional()
+            .map_err(|error| format!("Unable to inspect upscale job for cancellation: {error}"))?;
+
+        if existing.is_none() {
+            return Err("Upscale processing job was not found".to_string());
+        }
+        return Err("Only active upscale jobs can be cancelled".to_string());
+    }
+
+    load_upscale_processing_job(&connection, &job_id)
 }
 
 pub fn process_next_upscale_queue_item_for_paths(
@@ -594,6 +670,7 @@ pub fn repair_interrupted_upscale_processing_job_for_paths(
                     stage = 'interrupted',
                     progress_label = 'Job was marked interrupted',
                     error_message = ?1,
+                    engine_pid = NULL,
                     completed_at = ?2,
                     updated_at = ?2
                 WHERE id = ?3 AND status IN ('pending', 'running', 'cancel_requested')
@@ -839,6 +916,7 @@ fn process_queue_item_after_marked_processing(
         &item.desired_output_format,
         &stdout_path,
         &stderr_path,
+        None,
     )?;
 
     let duration_ms = elapsed_ms(started);
@@ -919,7 +997,7 @@ fn process_queue_item_after_marked_processing(
         })
     } else {
         let mut error = if run_result.timed_out {
-            "Real-ESRGAN processing timed out after 10 minutes".to_string()
+            PROCESSING_TIMEOUT_MESSAGE.to_string()
         } else if run_result.exit_code != Some(0) {
             format!("Real-ESRGAN exited with code {:?}", run_result.exit_code)
         } else {
@@ -1266,6 +1344,21 @@ fn run_upscale_processing_job(paths: AppPaths, job_id: String) -> Result<(), Str
         }
     };
 
+    if is_upscale_processing_job_cancel_requested(&connection, &job_id)? {
+        let _ = fail_processing_item(
+            &paths,
+            &connection,
+            &item.id,
+            &planned_command_preview(&planned),
+            "",
+            "",
+            0,
+            CANCELLED_PROCESSING_MESSAGE,
+        )?;
+        mark_upscale_processing_job_cancelled(&connection, &job_id, "", "")?;
+        return Ok(());
+    }
+
     let started = Instant::now();
     let processing_started_at = Utc::now().to_rfc3339();
     connection
@@ -1325,14 +1418,23 @@ fn run_upscale_processing_job(paths: AppPaths, job_id: String) -> Result<(), Str
                 error.duration_ms,
                 &error.message,
             )?;
-            mark_upscale_processing_job_failed(
-                &connection,
-                &job_id,
-                "failed",
-                &error.message,
-                &error.stdout_preview,
-                &error.stderr_preview,
-            )?;
+            if error.cancelled {
+                mark_upscale_processing_job_cancelled(
+                    &connection,
+                    &job_id,
+                    &error.stdout_preview,
+                    &error.stderr_preview,
+                )?;
+            } else {
+                mark_upscale_processing_job_failed(
+                    &connection,
+                    &job_id,
+                    "failed",
+                    &error.message,
+                    &error.stdout_preview,
+                    &error.stderr_preview,
+                )?;
+            }
             Ok(())
         }
     }
@@ -1349,6 +1451,7 @@ struct PlannedJobFailure {
     stdout_preview: String,
     stderr_preview: String,
     duration_ms: i64,
+    cancelled: bool,
 }
 
 fn execute_planned_upscale_job(
@@ -1422,6 +1525,10 @@ fn execute_planned_upscale_job(
             pass_format,
             &stdout_path,
             &stderr_path,
+            Some(CommandCancelContext {
+                paths,
+                job_id,
+            }),
         ) {
             Ok(result) => result,
             Err(error) => {
@@ -1433,9 +1540,18 @@ fn execute_planned_upscale_job(
         append_preview(&mut stdout_preview, &run_result.stdout_preview);
         append_preview(&mut stderr_preview, &run_result.stderr_preview);
 
+        if run_result.cancelled {
+            cleanup_failed_job_paths(&output_plan);
+            return Err(job_cancelled_failure(
+                &stdout_preview,
+                &stderr_preview,
+                elapsed_ms(started),
+            ));
+        }
+
         if run_result.timed_out || run_result.exit_code != Some(0) || !pass_output.is_file() {
             let message = if run_result.timed_out {
-                "Real-ESRGAN processing timed out. Try Safe laptop mode or a smaller target.".to_string()
+                PROCESSING_TIMEOUT_MESSAGE.to_string()
             } else if run_result.exit_code != Some(0) {
                 format!("Real-ESRGAN exited with code {:?}", run_result.exit_code)
             } else {
@@ -1446,6 +1562,19 @@ fn execute_planned_upscale_job(
         }
 
         current_input = pass_output;
+    }
+
+    match is_upscale_processing_job_cancel_requested(connection, job_id) {
+        Ok(true) => {
+            cleanup_failed_job_paths(&output_plan);
+            return Err(job_cancelled_failure(
+                &stdout_preview,
+                &stderr_preview,
+                elapsed_ms(started),
+            ));
+        }
+        Ok(false) => {}
+        Err(error) => return Err(job_failure(error, &stdout_preview, &stderr_preview, elapsed_ms(started))),
     }
 
     if planned.needs_final_resize {
@@ -1487,6 +1616,26 @@ fn execute_planned_upscale_job(
         ) {
             cleanup_failed_job_paths(&output_plan);
             return Err(job_failure(error, &stdout_preview, &stderr_preview, elapsed_ms(started)));
+        }
+
+        match is_upscale_processing_job_cancel_requested(connection, job_id) {
+            Ok(true) => {
+                cleanup_failed_job_paths(&output_plan);
+                return Err(job_cancelled_failure(
+                    &stdout_preview,
+                    &stderr_preview,
+                    elapsed_ms(started),
+                ));
+            }
+            Ok(false) => {}
+            Err(error) => {
+                return Err(job_failure(
+                    error,
+                    &stdout_preview,
+                    &stderr_preview,
+                    elapsed_ms(started),
+                ));
+            }
         }
     }
 
@@ -1624,6 +1773,21 @@ fn job_failure(
         stdout_preview: stdout_preview.to_string(),
         stderr_preview: stderr_preview.to_string(),
         duration_ms,
+        cancelled: false,
+    }
+}
+
+fn job_cancelled_failure(
+    stdout_preview: &str,
+    stderr_preview: &str,
+    duration_ms: i64,
+) -> PlannedJobFailure {
+    PlannedJobFailure {
+        message: CANCELLED_PROCESSING_MESSAGE.to_string(),
+        stdout_preview: stdout_preview.to_string(),
+        stderr_preview: stderr_preview.to_string(),
+        duration_ms,
+        cancelled: true,
     }
 }
 
@@ -1679,7 +1843,7 @@ fn mark_upscale_processing_job_running(
                 progress_label = ?2,
                 started_at = COALESCE(started_at, ?3),
                 updated_at = ?3
-            WHERE id = ?4
+            WHERE id = ?4 AND status = 'pending'
             ",
             params![stage, progress_label, now, job_id],
         )
@@ -1701,7 +1865,7 @@ fn mark_upscale_processing_job_progress(
             SET stage = ?1,
                 progress_label = ?2,
                 updated_at = ?3
-            WHERE id = ?4
+            WHERE id = ?4 AND status != 'cancel_requested'
             ",
             params![stage, progress_label, now, job_id],
         )
@@ -1728,6 +1892,7 @@ fn mark_upscale_processing_job_completed(
                 error_message = NULL,
                 stdout_preview = ?2,
                 stderr_preview = ?3,
+                engine_pid = NULL,
                 completed_at = ?4,
                 updated_at = ?4
             WHERE id = ?5
@@ -1754,9 +1919,11 @@ fn mark_upscale_processing_job_failed(
             SET status = 'failed',
                 stage = ?1,
                 progress_label = 'Job failed',
+                output_relative_path = NULL,
                 error_message = ?2,
                 stdout_preview = ?3,
                 stderr_preview = ?4,
+                engine_pid = NULL,
                 completed_at = ?5,
                 updated_at = ?5
             WHERE id = ?6
@@ -1765,6 +1932,71 @@ fn mark_upscale_processing_job_failed(
         )
         .map_err(|error| format!("Unable to fail upscale processing job: {error}"))?;
     Ok(())
+}
+
+fn mark_upscale_processing_job_cancelled(
+    connection: &Connection,
+    job_id: &str,
+    stdout_preview: &str,
+    stderr_preview: &str,
+) -> Result<(), String> {
+    let now = Utc::now().to_rfc3339();
+    connection
+        .execute(
+            "
+            UPDATE upscale_processing_jobs
+            SET status = 'failed',
+                stage = 'cancelled',
+                progress_label = 'Processing cancelled',
+                output_relative_path = NULL,
+                error_message = ?1,
+                stdout_preview = ?2,
+                stderr_preview = ?3,
+                engine_pid = NULL,
+                cancelled_at = ?4,
+                completed_at = ?4,
+                updated_at = ?4
+            WHERE id = ?5
+            ",
+            params![CANCELLED_PROCESSING_MESSAGE, stdout_preview, stderr_preview, now, job_id],
+        )
+        .map_err(|error| format!("Unable to mark upscale processing job cancelled: {error}"))?;
+    Ok(())
+}
+
+fn mark_upscale_processing_job_engine_pid(
+    connection: &Connection,
+    job_id: &str,
+    engine_pid: Option<i64>,
+) -> Result<(), String> {
+    let now = Utc::now().to_rfc3339();
+    connection
+        .execute(
+            "
+            UPDATE upscale_processing_jobs
+            SET engine_pid = ?1,
+                updated_at = ?2
+            WHERE id = ?3
+            ",
+            params![engine_pid, now, job_id],
+        )
+        .map_err(|error| format!("Unable to update Real-ESRGAN engine pid: {error}"))?;
+    Ok(())
+}
+
+fn is_upscale_processing_job_cancel_requested(
+    connection: &Connection,
+    job_id: &str,
+) -> Result<bool, String> {
+    connection
+        .query_row(
+            "SELECT status = 'cancel_requested' FROM upscale_processing_jobs WHERE id = ?1",
+            params![job_id],
+            |row| row.get::<_, i64>(0),
+        )
+        .optional()
+        .map(|value| value.unwrap_or(0) == 1)
+        .map_err(|error| format!("Unable to inspect upscale job cancellation state: {error}"))
 }
 
 fn mark_upscale_processing_job_failed_for_paths(
@@ -1828,7 +2060,10 @@ fn load_upscale_processing_job(
                 error_message,
                 COALESCE(stdout_preview, ''),
                 COALESCE(stderr_preview, ''),
-                plan_json
+                plan_json,
+                engine_pid,
+                cancel_requested_at,
+                cancelled_at
             FROM upscale_processing_jobs
             WHERE id = ?1
             ",
@@ -1868,6 +2103,43 @@ fn load_upscale_processing_job(
                         .as_ref()
                         .map(|plan| plan.tile_size_label.clone())
                         .unwrap_or_else(|| "unknown".to_string()),
+                    preset_id: planned.as_ref().and_then(|plan| plan.preset_id.clone()),
+                    preset_label: planned.as_ref().and_then(|plan| plan.preset_label.clone()),
+                    resolved_tile_size: planned
+                        .as_ref()
+                        .map(|plan| {
+                            if plan.resolved_tile_size > 0 {
+                                plan.resolved_tile_size
+                            } else {
+                                plan.tile_size
+                            }
+                        })
+                        .unwrap_or(0),
+                    pass_count: planned
+                        .as_ref()
+                        .map(|plan| {
+                            if plan.pass_count > 0 {
+                                plan.pass_count
+                            } else {
+                                plan.passes.len()
+                            }
+                        })
+                        .unwrap_or(0),
+                    source_width: planned.as_ref().map(|plan| plan.source_width).unwrap_or(0),
+                    source_height: planned.as_ref().map(|plan| plan.source_height).unwrap_or(0),
+                    target_width: planned.as_ref().map(|plan| plan.target_width).unwrap_or(0),
+                    target_height: planned.as_ref().map(|plan| plan.target_height).unwrap_or(0),
+                    target_megapixels: planned
+                        .as_ref()
+                        .map(|plan| plan.target_megapixels)
+                        .unwrap_or(0.0),
+                    size_category: planned
+                        .as_ref()
+                        .map(|plan| plan.size_category.clone())
+                        .unwrap_or_else(|| "unknown".to_string()),
+                    engine_pid: row.get(12)?,
+                    cancel_requested_at: row.get(13)?,
+                    cancelled_at: row.get(14)?,
                 })
             },
         )
@@ -1925,6 +2197,8 @@ fn build_upscale_processing_plan(
     input: &UpscaleProcessingPlanInput,
     source: ImageDimensions,
 ) -> Result<PlannedUpscaleJob, String> {
+    let preset_id = normalized_optional_plan_text(input.preset_id.as_deref(), 60);
+    let preset_label = normalized_optional_plan_text(input.preset_label.as_deref(), 90);
     let quality_mode = validate_quality_mode(&input.quality_mode)?;
     let output_format = validate_job_output_format(&input.output_format)?;
     let mode = input.mode.trim().to_lowercase();
@@ -2001,15 +2275,25 @@ fn build_upscale_processing_plan(
 
     let target_megapixels = megapixels(target_width, target_height);
     let size_category = output_size_category(target_megapixels).to_string();
-    let (tile_size, tile_size_label) = resolve_tile_size(&input.tile_size, &quality_mode, target_megapixels)?;
+    let (tile_size, tile_size_label) = resolve_tile_size(
+        &input.tile_size,
+        &quality_mode,
+        target_megapixels,
+        preset_id.as_deref(),
+    )?;
+    let pass_count = passes.len();
 
     Ok(PlannedUpscaleJob {
+        preset_id,
+        preset_label,
         mode,
         target_label,
         quality_mode,
         output_format,
         tile_size_label,
         tile_size,
+        resolved_tile_size: tile_size,
+        pass_count,
         source_width: source.width,
         source_height: source.height,
         target_width,
@@ -2039,10 +2323,18 @@ fn validate_job_output_format(value: &str) -> Result<String, String> {
     }
 }
 
+fn normalized_optional_plan_text(value: Option<&str>, max_chars: usize) -> Option<String> {
+    value
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(|value| value.chars().take(max_chars).collect())
+}
+
 fn resolve_tile_size(
     value: &serde_json::Value,
     quality_mode: &str,
     target_megapixels: f64,
+    preset_id: Option<&str>,
 ) -> Result<(i64, String), String> {
     if let Some(tile_size) = value.as_i64() {
         if matches!(tile_size, 64 | 128 | 256 | 512) {
@@ -2052,12 +2344,54 @@ fn resolve_tile_size(
     }
 
     if value.as_str().unwrap_or_default().eq_ignore_ascii_case("auto") {
-        let tile_size = if target_megapixels >= 50.0 {
-            64
-        } else if target_megapixels >= 25.0 || quality_mode == "safe" {
-            128
-        } else {
-            256
+        let is_very_heavy = target_megapixels >= 50.0;
+        let tile_size = match preset_id.unwrap_or_default() {
+            "production_fast" => {
+                if target_megapixels < 25.0 {
+                    256
+                } else if target_megapixels <= 50.0 {
+                    128
+                } else {
+                    64
+                }
+            }
+            "production_quality" => {
+                if target_megapixels < 25.0 {
+                    256
+                } else {
+                    128
+                }
+            }
+            "large_output_safe" => {
+                if is_very_heavy {
+                    64
+                } else {
+                    128
+                }
+            }
+            "ultra_detail" => {
+                if is_very_heavy {
+                    64
+                } else {
+                    128
+                }
+            }
+            "quick_test" => {
+                if target_megapixels >= 25.0 || quality_mode == "safe" {
+                    128
+                } else {
+                    256
+                }
+            }
+            _ => {
+                if target_megapixels >= 50.0 {
+                    64
+                } else if target_megapixels >= 25.0 || quality_mode == "safe" {
+                    128
+                } else {
+                    256
+                }
+            }
         };
         return Ok((tile_size, format!("auto ({tile_size})")));
     }
@@ -3009,6 +3343,7 @@ fn run_processing_command(
     output_format: &str,
     stdout_path: &Path,
     stderr_path: &Path,
+    cancel_context: Option<CommandCancelContext<'_>>,
 ) -> Result<CommandRunResult, String> {
     let stdout_file = create_new_temp_file(stdout_path, "engine stdout temp file")?;
     let stderr_file = match create_new_temp_file(stderr_path, "engine stderr temp file") {
@@ -3053,8 +3388,22 @@ fn run_processing_command(
             return Err(format!("Unable to start Real-ESRGAN processing: {error}"));
         }
     };
+
+    if let Some(context) = cancel_context.as_ref() {
+        let connection = open_processing_connection(context.paths)?;
+        if let Err(error) =
+            mark_upscale_processing_job_engine_pid(&connection, context.job_id, Some(i64::from(child.id())))
+        {
+            let _ = child.kill();
+            let _ = child.wait();
+            cleanup_temp_files(stdout_path, stderr_path);
+            return Err(error);
+        }
+    }
+
     let started_at = Instant::now();
     let mut timed_out = false;
+    let mut cancelled = false;
     let exit_code = loop {
         match child.try_wait() {
             Ok(Some(status)) => break status.code(),
@@ -3063,7 +3412,36 @@ fn run_processing_command(
                 let _ = child.kill();
                 let _ = child.wait();
                 cleanup_temp_files(stdout_path, stderr_path);
+                if let Some(context) = cancel_context.as_ref() {
+                    let _ = open_processing_connection(context.paths).and_then(|connection| {
+                        mark_upscale_processing_job_engine_pid(&connection, context.job_id, None)
+                    });
+                }
                 return Err(format!("Unable to monitor Real-ESRGAN processing: {error}"));
+            }
+        }
+
+        if let Some(context) = cancel_context.as_ref() {
+            let connection = open_processing_connection(context.paths)?;
+            if is_upscale_processing_job_cancel_requested(&connection, context.job_id)? {
+                cancelled = true;
+                let _ = child.kill();
+                let status = match child.wait() {
+                    Ok(status) => status,
+                    Err(error) => {
+                        cleanup_temp_files(stdout_path, stderr_path);
+                        let _ = mark_upscale_processing_job_engine_pid(
+                            &connection,
+                            context.job_id,
+                            None,
+                        );
+                        return Err(format!(
+                            "Unable to stop cancelled Real-ESRGAN processing: {error}"
+                        ));
+                    }
+                };
+                let _ = mark_upscale_processing_job_engine_pid(&connection, context.job_id, None);
+                break status.code();
             }
         }
 
@@ -3074,6 +3452,15 @@ fn run_processing_command(
                 Ok(status) => status,
                 Err(error) => {
                     cleanup_temp_files(stdout_path, stderr_path);
+                    if let Some(context) = cancel_context.as_ref() {
+                        let _ = open_processing_connection(context.paths).and_then(|connection| {
+                            mark_upscale_processing_job_engine_pid(
+                                &connection,
+                                context.job_id,
+                                None,
+                            )
+                        });
+                    }
                     return Err(format!(
                         "Unable to stop timed out Real-ESRGAN processing: {error}"
                     ));
@@ -3082,8 +3469,14 @@ fn run_processing_command(
             break status.code();
         }
 
-        thread::sleep(Duration::from_millis(150));
+        thread::sleep(Duration::from_millis(300));
     };
+
+    if let Some(context) = cancel_context.as_ref() {
+        let _ = open_processing_connection(context.paths).and_then(|connection| {
+            mark_upscale_processing_job_engine_pid(&connection, context.job_id, None)
+        });
+    }
 
     let stdout_preview = fs::read_to_string(stdout_path)
         .map(|content| preview_text(&content, PREVIEW_LIMIT))
@@ -3102,6 +3495,7 @@ fn run_processing_command(
         stdout_preview,
         stderr_preview,
         timed_out,
+        cancelled,
     })
 }
 

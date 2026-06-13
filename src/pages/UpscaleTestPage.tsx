@@ -15,6 +15,7 @@ import {
   repairInterruptedUpscaleProcessingJob,
   repairMissingRawQueueItems,
   repairStaleProcessingItems,
+  requestCancelUpscaleProcessingJob,
   startUpscaleProcessingJob
 } from "../app/upscaleProcessingApi";
 import {
@@ -27,7 +28,6 @@ import {
 } from "../app/upscaleQueueApi";
 import { Badge } from "../components/ui/Badge";
 import { Button } from "../components/ui/Button";
-import { Card } from "../components/ui/Card";
 import type {
   EngineDiscoveryStatus,
   EngineExpectedLayout,
@@ -53,6 +53,83 @@ const jobOutputFormatOptions: Array<UpscaleProcessingPlanInput["output_format"]>
   "jpg",
   "webp"
 ];
+
+type OutputTargetOption =
+  | "scale_2"
+  | "scale_4"
+  | "scale_8"
+  | "scale_10"
+  | "target_8k"
+  | "custom_long_edge";
+
+type ProcessingPresetId =
+  | "quick_test"
+  | "production_fast"
+  | "production_quality"
+  | "large_output_safe"
+  | "ultra_detail";
+
+interface ProcessingPreset {
+  id: ProcessingPresetId;
+  name: string;
+  label: string;
+  targetOption: OutputTargetOption;
+  qualityMode: UpscaleProcessingQualityMode;
+  tileSize: UpscaleProcessingTileSize;
+  outputFormat: UpscaleProcessingPlanInput["output_format"];
+}
+
+const processingPresets: ProcessingPreset[] = [
+  {
+    id: "quick_test",
+    name: "Quick Test",
+    label: "Fast first check",
+    targetOption: "scale_2",
+    qualityMode: "safe",
+    tileSize: "auto",
+    outputFormat: "png"
+  },
+  {
+    id: "production_fast",
+    name: "Production Fast",
+    label: "Best daily production default",
+    targetOption: "scale_4",
+    qualityMode: "balanced",
+    tileSize: "auto",
+    outputFormat: "png"
+  },
+  {
+    id: "production_quality",
+    name: "Production Quality",
+    label: "Sharper output, may be slower",
+    targetOption: "scale_4",
+    qualityMode: "balanced",
+    tileSize: 256,
+    outputFormat: "png"
+  },
+  {
+    id: "large_output_safe",
+    name: "Large Output Safe",
+    label: "For 8x or 8K on low-spec systems",
+    targetOption: "scale_8",
+    qualityMode: "safe",
+    tileSize: "auto",
+    outputFormat: "png"
+  },
+  {
+    id: "ultra_detail",
+    name: "Ultra Detail",
+    label: "Slow. Use only for special images.",
+    targetOption: "scale_8",
+    qualityMode: "ultra",
+    tileSize: 128,
+    outputFormat: "png"
+  }
+];
+
+const processingPresetById = new Map(
+  processingPresets.map((preset) => [preset.id, preset])
+);
 
 export function UpscaleTestPage() {
   const [queueResponse, setQueueResponse] =
@@ -82,6 +159,22 @@ export function UpscaleTestPage() {
   const [activeJob, setActiveJob] =
     useState<UpscaleProcessingJobStatus | null>(null);
   const [jobBanner, setJobBanner] = useState<string | null>(null);
+  const [selectedQueueItemId, setSelectedQueueItemId] = useState<string | null>(
+    null
+  );
+  const [smoothPreviewMode, setSmoothPreviewMode] = useState(true);
+  const [selectedPresetId, setSelectedPresetId] =
+    useState<ProcessingPresetId>("quick_test");
+  const [presetTouched, setPresetTouched] = useState(false);
+  const [targetOption, setTargetOption] =
+    useState<OutputTargetOption>("scale_2");
+  const [customLongEdge, setCustomLongEdge] = useState(7680);
+  const [qualityMode, setQualityMode] =
+    useState<UpscaleProcessingQualityMode>("safe");
+  const [tileSize, setTileSize] =
+    useState<UpscaleProcessingTileSize>("auto");
+  const [jobOutputFormat, setJobOutputFormat] =
+    useState<UpscaleProcessingPlanInput["output_format"]>("png");
 
   const [assetHealth, setAssetHealth] =
     useState<UpscaleQueueAssetHealth | null>(null);
@@ -108,11 +201,54 @@ export function UpscaleTestPage() {
     }
     return healthMap;
   }, [assetHealth]);
+  const activeItems = useMemo(
+    () => queueResponse?.items ?? [],
+    [queueResponse]
+  );
+  const selectedQueueItem = useMemo(
+    () =>
+      activeItems.find((item) => item.id === selectedQueueItemId) ??
+      activeItems.find(canProcessQueueItem) ??
+      activeItems[0] ??
+      null,
+    [activeItems, selectedQueueItemId]
+  );
+  const selectedPreset =
+    processingPresetById.get(selectedPresetId) ?? processingPresets[0];
 
   useEffect(() => {
     void refreshQueue();
     void refreshActiveJob();
   }, []);
+
+  useEffect(() => {
+    if (activeItems.length === 0) {
+      setSelectedQueueItemId(null);
+      return;
+    }
+
+    if (!selectedQueueItemId || !activeItems.some((item) => item.id === selectedQueueItemId)) {
+      setSelectedQueueItemId(
+        activeItems.find(canProcessQueueItem)?.id ?? activeItems[0].id
+      );
+    }
+  }, [activeItems, selectedQueueItemId]);
+
+  useEffect(() => {
+    if (presetTouched) {
+      return;
+    }
+
+    const defaultPresetId =
+      (processingStatus?.completed ?? 0) > 0 ? "production_fast" : "quick_test";
+    const preset = processingPresetById.get(defaultPresetId);
+    if (!preset || selectedPresetId === defaultPresetId) {
+      return;
+    }
+
+    setSelectedPresetId(defaultPresetId);
+    applyProcessingPreset(preset);
+  }, [processingStatus?.completed, presetTouched, selectedPresetId]);
 
   useEffect(() => {
     if (!activeJob || !isActiveJobRunning(activeJob)) {
@@ -330,6 +466,33 @@ export function UpscaleTestPage() {
     }
   };
 
+  function applyProcessingPreset(preset: ProcessingPreset) {
+    setTargetOption(preset.targetOption);
+    setQualityMode(preset.qualityMode);
+    setTileSize(preset.tileSize);
+    setJobOutputFormat(preset.outputFormat);
+  }
+
+  const handlePresetChange = (presetId: ProcessingPresetId) => {
+    const preset = processingPresetById.get(presetId);
+    if (!preset) {
+      return;
+    }
+
+    if (
+      preset.id === "ultra_detail" &&
+      !window.confirm(
+        "Ultra detail can be very slow. Use only for special images. Continue?"
+      )
+    ) {
+      return;
+    }
+
+    setPresetTouched(true);
+    setSelectedPresetId(preset.id);
+    applyProcessingPreset(preset);
+  };
+
   const handleStartProcessingJob = async (
     queueItemId: string,
     plan: UpscaleProcessingPlanInput
@@ -360,6 +523,55 @@ export function UpscaleTestPage() {
     }
   };
 
+  const handleStartSelectedProcessingJob = async () => {
+    if (!selectedQueueItem) {
+      setProcessingMessageVariant("warning");
+      setProcessingMessage("Import or select an image before processing.");
+      return;
+    }
+
+    await handleStartProcessingJob(
+      selectedQueueItem.id,
+      buildProcessingPlanInput(
+        targetOption,
+        customLongEdge,
+        qualityMode,
+        tileSize,
+        jobOutputFormat,
+        selectedPreset
+      )
+    );
+  };
+
+  const handleRequestCancelJob = async () => {
+    if (!activeJob || !isActiveJobRunning(activeJob)) {
+      return;
+    }
+
+    const confirmed = window.confirm(
+      "Stop current processing? The raw image will remain safe. Partial temporary files may be cleaned."
+    );
+    if (!confirmed) {
+      return;
+    }
+
+    setIsProcessingBusy(true);
+    setProcessingMessage(null);
+    setProcessingError(null);
+
+    try {
+      const job = await requestCancelUpscaleProcessingJob(activeJob.job_id);
+      setActiveJob(job);
+      setProcessingMessageVariant("warning");
+      setProcessingMessage(job.message);
+      await refreshQueue(job.message);
+    } catch (error: unknown) {
+      setProcessingError(commandErrorMessage(error));
+    } finally {
+      setIsProcessingBusy(false);
+    }
+  };
+
   const handleOpenUpscaledFolder = async () => {
     setProcessingError(null);
 
@@ -378,7 +590,7 @@ export function UpscaleTestPage() {
     }
 
     const confirmed = window.confirm(
-      "Use this only if the app was closed, frozen, or the job is no longer actually running. This will unlock processing."
+      "Use Repair Stuck Job only if the app was closed or Windows crashed and no Real-ESRGAN process is running."
     );
     if (!confirmed) {
       return;
@@ -491,205 +703,96 @@ export function UpscaleTestPage() {
 
   const hasQueueHealthIssue =
     (assetHealth?.missing_raw ?? 0) > 0 || (assetHealth?.invalid_path ?? 0) > 0;
-  const activeItems = queueResponse?.items ?? [];
   const jobIsActive = Boolean(activeJob && isActiveJobRunning(activeJob));
+  const canStopActiveJob = Boolean(
+    activeJob &&
+      (activeJob.status === "pending" || activeJob.status === "running")
+  );
+  const selectedPlan = buildProcessingPlanInput(
+    targetOption,
+    customLongEdge,
+    qualityMode,
+    tileSize,
+    jobOutputFormat,
+    selectedPreset
+  );
+  const factoryStatus = factoryStatusLabel(discovery, activeJob, processingStatus);
+  const progressPercent = progressPercentForJob(activeJob);
+  const showHeavyWarning =
+    matchesLargeTarget(targetOption) ||
+    activeJob?.size_category === "heavy" ||
+    activeJob?.size_category === "very heavy";
 
   return (
-    <section className="page">
-      <div className="page-heading">
+    <section className="page upscale-factory">
+      <header className="factory-header">
         <div>
-          <p className="eyebrow">Workspace</p>
           <h2>Upscale Factory</h2>
+          <p>Local AI image upscaling for sublimation and marketplace images</p>
         </div>
-        <Badge variant="success">Worker queue</Badge>
+        <Badge variant={factoryBadgeVariant(factoryStatus)}>{factoryStatus}</Badge>
+      </header>
+
+      <div className="factory-toolbar">
+        <Button
+          disabled={isQueueBusy || jobIsActive}
+          onClick={() => void handleImportImages()}
+          variant="primary"
+        >
+          Import Images
+        </Button>
+        <Button
+          disabled={isQueueBusy || jobIsActive}
+          onClick={() => void handleImportFolder()}
+          variant="secondary"
+        >
+          Import Folder
+        </Button>
+        <Button
+          disabled={isQueueBusy || jobIsActive || !queueResponse?.summary.total}
+          onClick={() => void handleStartFreshQueue()}
+          variant="secondary"
+        >
+          Start Fresh Queue
+        </Button>
+        <Button
+          disabled={isEngineBusy}
+          onClick={() => void handleDiscover()}
+          variant="secondary"
+        >
+          Discover Engine
+        </Button>
+        <Button
+          disabled={isEngineBusy}
+          onClick={() => void handleOpenEngineFolder()}
+          variant="secondary"
+        >
+          Open Engine Folder
+        </Button>
+        <Button onClick={() => void handleOpenUpscaledFolder()} variant="secondary">
+          Open Upscaled Folder
+        </Button>
       </div>
 
-      {(assetHealth?.missing_raw ?? 0) > 0 ? (
-        <div className="notice notice-warning">
-          Some queued files are missing from AppData. Click Mark Missing Raw as
-          Failed or Start Fresh Queue.
-        </div>
-      ) : null}
-
-      {queueError ? (
-        <div className="notice notice-warning">{queueError}</div>
-      ) : null}
-      {queueMessage ? (
-        <div
-          className={`notice ${
-            queueMessageVariant === "warning"
-              ? "notice-warning"
-              : "notice-success"
-          }`}
-        >
-          {queueMessage}
-        </div>
-      ) : null}
-
-      <Card
-        title="1. Import Images"
-        status={<Badge variant="info">AppData copy</Badge>}
-      >
-        <div className="settings-actions">
-          <Button
-            disabled={isQueueBusy || jobIsActive}
-            onClick={() => void handleImportImages()}
-            variant="primary"
-          >
-            Import Images
-          </Button>
-          <Button
-            disabled={isQueueBusy || jobIsActive}
-            onClick={() => void handleImportFolder()}
-            variant="secondary"
-          >
-            Import Folder
-          </Button>
-        </div>
-        <p>Last import only shows the latest action. Current queue is below.</p>
-        {importResult ? <ImportResultDetails result={importResult} /> : null}
-      </Card>
-
-      <Card
-        title="2. Engine Status"
-        status={
-          <Badge variant={discovery?.ok ? "success" : "warning"}>
-            {discovery?.ok ? "Engine Ready" : "Engine Missing"}
-          </Badge>
-        }
-      >
-        <div className="summary-grid">
-          <SummaryItem
-            label="Engine"
-            value={discovery?.ok ? "Ready" : "Missing"}
-          />
-          <SummaryItem
-            label="Binary"
-            value={discovery?.binary?.exists ? "Found" : "Missing"}
-          />
-          <SummaryItem
-            label="Model Files"
-            value={discovery?.models.model_files_count ?? 0}
-          />
-        </div>
-        <div className="settings-actions">
-          <Button
-            disabled={isEngineBusy}
-            onClick={() => void handleDiscover()}
-            variant="primary"
-          >
-            Discover Engine
-          </Button>
-          <Button
-            disabled={isEngineBusy}
-            onClick={() => void handleOpenEngineFolder()}
-            variant="secondary"
-          >
-            Open Engine Folder
-          </Button>
-        </div>
-        {engineErrorMessage ? (
-          <div className="notice notice-warning">{engineErrorMessage}</div>
-        ) : null}
-        {engineMessage ? (
-          <div className="notice notice-success">{engineMessage}</div>
-        ) : null}
-      </Card>
-
-      <Card
-        title="3. Queue Health"
-        status={
-          <Badge variant={assetHealth?.ok ? "success" : "warning"}>
-            {assetHealth?.ok ? "Files Healthy" : "Needs Check"}
-          </Badge>
-        }
-      >
-        <div className="summary-grid">
-          <SummaryItem label="Healthy" value={assetHealth?.healthy ?? 0} />
-          <SummaryItem label="Missing Raw" value={assetHealth?.missing_raw ?? 0} />
-          <SummaryItem
-            label="Invalid Path"
-            value={assetHealth?.invalid_path ?? 0}
-          />
-        </div>
-        <div className="settings-actions">
-          <Button
-            disabled={isHealthBusy}
-            onClick={() => void handleCheckQueueFiles()}
-            variant="primary"
-          >
-            Check Queue Files
-          </Button>
-          <Button
-            disabled={isHealthBusy || jobIsActive || !hasQueueHealthIssue}
-            onClick={() => void handleRepairMissingRaw()}
-            variant="secondary"
-          >
-            Mark Missing Raw as Failed
-          </Button>
-        </div>
-        {hasQueueHealthIssue ? (
+      <div className="factory-message-stack">
+        {(assetHealth?.missing_raw ?? 0) > 0 ? (
           <div className="notice notice-warning">
-            Some queue rows point to raw files that are missing from AppData.
-            This can happen if AppData folders were manually deleted. Re-import
-            those images or remove the broken rows.
+            Some queued files are missing from AppData. Use Queue Health &
+            Recovery when processing is idle.
           </div>
         ) : null}
-        {healthError ? (
-          <div className="notice notice-warning">{healthError}</div>
-        ) : null}
-        {healthMessage ? (
+        {queueError ? <div className="notice notice-warning">{queueError}</div> : null}
+        {queueMessage ? (
           <div
             className={`notice ${
-              healthMessageVariant === "warning"
+              queueMessageVariant === "warning"
                 ? "notice-warning"
                 : "notice-success"
             }`}
           >
-            {healthMessage}
+            {queueMessage}
           </div>
         ) : null}
-      </Card>
-
-      <Card
-        title="4. Process Images"
-        status={
-          <Badge variant={processingStatus?.processing ? "warning" : "info"}>
-            {processingStatus?.processing
-              ? `${processingStatus.processing} Processing`
-              : "Ready"}
-          </Badge>
-        }
-      >
-        <p>Completed images are saved in AppData/assets/upscaled/YYYYMMDD.</p>
-        <div className="settings-actions worker-primary-actions">
-          <Button
-            disabled={isQueueBusy || jobIsActive || !queueResponse?.summary.total}
-            onClick={() => void handleStartFreshQueue()}
-            variant="ghost"
-          >
-            Start Fresh Queue
-          </Button>
-          <Button
-            disabled={isProcessingBusy}
-            onClick={() => void handleOpenUpscaledFolder()}
-            variant="secondary"
-          >
-            Open Upscaled Folder
-          </Button>
-        </div>
-        <div className="summary-grid">
-          <SummaryItem label="Ready" value={processingStatus?.queued ?? 0} />
-          <SummaryItem
-            label="Processing"
-            value={processingStatus?.processing ?? 0}
-          />
-          <SummaryItem label="Done" value={processingStatus?.completed ?? 0} />
-          <SummaryItem
-            label="Needs Attention"
-            value={processingStatus?.failed ?? 0}
-          />
-        </div>
         {processingError ? (
           <div className="notice notice-warning">{processingError}</div>
         ) : null}
@@ -704,18 +807,341 @@ export function UpscaleTestPage() {
             {processingMessage}
           </div>
         ) : null}
-        {jobBanner && activeJob && isActiveJobRunning(activeJob) ? (
-          <div className="notice notice-success">{jobBanner}</div>
+        {engineErrorMessage ? (
+          <div className="notice notice-warning">{engineErrorMessage}</div>
         ) : null}
-        {activeJob ? (
-          <ActiveJobCard
-            job={activeJob}
-            imageName={imageNameForJob(activeJob, activeItems)}
-            onOpenUpscaledFolder={handleOpenUpscaledFolder}
-            onRepairInterruptedJob={handleRepairInterruptedJob}
-          />
+        {engineMessage ? (
+          <div className="notice notice-success">{engineMessage}</div>
         ) : null}
-        <div className="settings-actions secondary-actions">
+      </div>
+
+      <div className="factory-workspace">
+        <main className="factory-main">
+          <section className="factory-panel">
+            <div className="factory-panel-header">
+              <div>
+                <h3>Selected Image Review</h3>
+                <p>Completed images are saved in: AppData/assets/upscaled/YYYYMMDD</p>
+              </div>
+              <div className="factory-review-actions">
+                <label className="settings-checkbox factory-checkbox">
+                  <input
+                    checked={smoothPreviewMode}
+                    onChange={(event) =>
+                      setSmoothPreviewMode(event.currentTarget.checked)
+                    }
+                    type="checkbox"
+                  />
+                  <span>Smooth Preview Mode</span>
+                </label>
+                <Button disabled variant="ghost">
+                  Expand Preview
+                </Button>
+              </div>
+            </div>
+
+            {importResult ? <ImportResultDetails result={importResult} /> : null}
+
+            {activeItems.length > 0 ? (
+              <div
+                className={`factory-review-grid ${
+                  smoothPreviewMode ? "factory-review-grid-smooth" : ""
+                }`}
+              >
+                {activeItems.map((item) => (
+                  <QueueItemCard
+                    disabled={isQueueBusy || isProcessingBusy}
+                    health={queueHealthById.get(item.id)}
+                    item={item}
+                    key={item.id}
+                    onRemove={handleRemoveQueueItem}
+                    onSelect={setSelectedQueueItemId}
+                    processingLocked={jobIsActive}
+                    selected={item.id === selectedQueueItem?.id}
+                  />
+                ))}
+              </div>
+            ) : (
+              <div className="empty-state">No ready images in queue.</div>
+            )}
+          </section>
+
+          <section className="factory-panel factory-progress-panel">
+            <div className="factory-panel-header">
+              <div>
+                <h3>Processing Progress</h3>
+                <p>{progressTextForJob(activeJob)}</p>
+              </div>
+              <Badge variant={activeJob?.status === "failed" ? "warning" : "info"}>
+                {activeJob?.status ?? "idle"}
+              </Badge>
+            </div>
+            <div className="factory-progress-track">
+              <div
+                className="factory-progress-fill"
+                style={{ width: `${progressPercent}%` }}
+              />
+            </div>
+            {showHeavyWarning ? (
+              <div className="notice notice-warning">
+                This may take several minutes. Use Quick Test or Production Fast
+                first.
+              </div>
+            ) : null}
+            {activeJob && isLongRunningFourXJob(activeJob) ? (
+              <div className="notice notice-warning">
+                This is taking longer than expected. You can stop processing
+                safely.
+              </div>
+            ) : null}
+            {jobBanner && activeJob && isActiveJobRunning(activeJob) ? (
+              <div className="notice notice-success">{jobBanner}</div>
+            ) : null}
+            {activeJob ? (
+              <ActiveJobCard
+                job={activeJob}
+                imageName={imageNameForJob(activeJob, activeItems)}
+                onOpenUpscaledFolder={handleOpenUpscaledFolder}
+                onRepairInterruptedJob={handleRepairInterruptedJob}
+                onRequestCancelJob={handleRequestCancelJob}
+              />
+            ) : null}
+            <div className="summary-grid">
+              <SummaryItem label="Completed" value={processingStatus?.completed ?? 0} />
+              <SummaryItem label="Failed" value={processingStatus?.failed ?? 0} />
+              <SummaryItem
+                label="Before size"
+                value={dimensionsLabel(activeJob?.source_width, activeJob?.source_height)}
+              />
+              <SummaryItem
+                label="After size"
+                value={dimensionsLabel(activeJob?.target_width, activeJob?.target_height)}
+              />
+              <SummaryItem
+                label="Time elapsed"
+                value={activeJob ? elapsedJobTime(activeJob) : "0s"}
+              />
+              <SummaryItem
+                label="Output path"
+                value={activeJob?.output_relative_path ?? "Not created yet"}
+              />
+            </div>
+          </section>
+        </main>
+
+        <aside className="factory-side-panel">
+          <div className="factory-side-heading">
+            <span>Upscale Pro Recommended</span>
+            <strong>{selectedPreset.name}</strong>
+            <p>{selectedPreset.label}</p>
+          </div>
+
+          <label className="settings-field">
+            <span>Processing Preset</span>
+            <select
+              disabled={jobIsActive}
+              value={selectedPresetId}
+              onChange={(event) =>
+                handlePresetChange(event.currentTarget.value as ProcessingPresetId)
+              }
+            >
+              {processingPresets.map((preset) => (
+                <option key={preset.id} value={preset.id}>
+                  {preset.name}
+                </option>
+              ))}
+            </select>
+          </label>
+
+          <label className="settings-field">
+            <span>Output Target</span>
+            <select
+              disabled={jobIsActive}
+              value={targetOption}
+              onChange={(event) =>
+                setTargetOption(event.currentTarget.value as OutputTargetOption)
+              }
+            >
+              <option value="scale_2">2x quick test</option>
+              <option value="scale_4">4x standard</option>
+              <option value="scale_8">8x large</option>
+              <option value="scale_10">10x large</option>
+              <option value="target_8k">8K long edge</option>
+              <option value="custom_long_edge">Custom long edge</option>
+            </select>
+          </label>
+
+          {targetOption === "custom_long_edge" ? (
+            <label className="settings-field">
+              <span>Long Edge</span>
+              <input
+                disabled={jobIsActive}
+                min={1000}
+                max={10000}
+                onChange={(event) =>
+                  setCustomLongEdge(Number(event.currentTarget.value))
+                }
+                type="number"
+                value={customLongEdge}
+              />
+            </label>
+          ) : null}
+
+          <label className="settings-field">
+            <span>Quality Mode</span>
+            <select
+              disabled={jobIsActive}
+              value={qualityMode}
+              onChange={(event) =>
+                setQualityMode(
+                  event.currentTarget.value as UpscaleProcessingQualityMode
+                )
+              }
+            >
+              <option value="safe">Safe laptop mode</option>
+              <option value="balanced">Balanced</option>
+              <option value="ultra">Ultra quality</option>
+            </select>
+          </label>
+
+          <label className="settings-field">
+            <span>Tile Size</span>
+            <select
+              disabled={jobIsActive}
+              value={tileSize}
+              onChange={(event) =>
+                setTileSize(parseTileSize(event.currentTarget.value))
+              }
+            >
+              <option value="auto">Auto</option>
+              <option value={64}>64</option>
+              <option value={128}>128</option>
+              <option value={256}>256</option>
+              <option value={512}>512</option>
+            </select>
+          </label>
+
+          <label className="settings-field">
+            <span>Output Format</span>
+            <select
+              disabled={jobIsActive}
+              value={jobOutputFormat}
+              onChange={(event) =>
+                setJobOutputFormat(
+                  event.currentTarget.value as UpscaleProcessingPlanInput["output_format"]
+                )
+              }
+            >
+              {jobOutputFormatOptions.map((format) => (
+                <option key={format} value={format}>
+                  {format.toUpperCase()}
+                </option>
+              ))}
+            </select>
+          </label>
+
+          <div className="factory-plan-stats">
+            <MetaItem
+              label="Estimated Size"
+              value={activeJob?.size_category ?? estimatedSizeLabel(targetOption)}
+            />
+            <MetaItem
+              label="AI Passes"
+              value={String(activeJob?.pass_count ?? estimatedPassCountForControls(targetOption, qualityMode))}
+            />
+            <MetaItem
+              label="Tile"
+              value={
+                activeJob?.resolved_tile_size
+                  ? String(activeJob.resolved_tile_size)
+                  : tileSize === "auto"
+                    ? "auto"
+                    : String(tileSize)
+              }
+            />
+          </div>
+
+          {selectedPlan.output_format === "webp" && selectedPlan.mode !== "scale" ? (
+            <div className="notice notice-warning">
+              Exact 8K/custom final resize works with PNG or JPG in Phase 1.
+            </div>
+          ) : null}
+
+          <div className="factory-side-actions">
+            <Button
+              disabled={
+                isProcessingBusy ||
+                jobIsActive ||
+                !selectedQueueItem ||
+                !canProcessQueueItem(selectedQueueItem)
+              }
+              onClick={() => void handleStartSelectedProcessingJob()}
+              variant="primary"
+            >
+              Start Processing
+            </Button>
+            {activeJob && isActiveJobRunning(activeJob) ? (
+              <Button
+                disabled={isProcessingBusy || !canStopActiveJob}
+                onClick={() => void handleRequestCancelJob()}
+                variant="secondary"
+              >
+                {activeJob.status === "cancel_requested"
+                  ? "Stopping..."
+                  : "Stop Processing"}
+              </Button>
+            ) : null}
+            {activeJob && isActiveJobRunning(activeJob) ? (
+              <Button
+                disabled={isProcessingBusy}
+                onClick={() => void handleRepairInterruptedJob()}
+                variant="ghost"
+              >
+                Repair Stuck Job
+              </Button>
+            ) : null}
+            <Button onClick={() => void handleOpenUpscaledFolder()} variant="secondary">
+              Open Output Folder
+            </Button>
+          </div>
+
+          {activeJob && isActiveJobRunning(activeJob) ? (
+            <p className="field-note">
+              Use Repair Stuck Job only if the app was closed or Windows crashed
+              and no Real-ESRGAN process is running.
+            </p>
+          ) : null}
+          {activeJob?.output_relative_path ? (
+            <div className="notice notice-success">
+              Output saved: {activeJob.output_relative_path}
+            </div>
+          ) : null}
+        </aside>
+      </div>
+
+      <details className="factory-secondary" open={hasQueueHealthIssue}>
+        <summary>Queue Health & Recovery</summary>
+        <div className="summary-grid">
+          <SummaryItem label="Healthy" value={assetHealth?.healthy ?? 0} />
+          <SummaryItem label="Missing Raw" value={assetHealth?.missing_raw ?? 0} />
+          <SummaryItem label="Invalid Path" value={assetHealth?.invalid_path ?? 0} />
+          <SummaryItem label="Processing" value={processingStatus?.processing ?? 0} />
+        </div>
+        <div className="settings-actions">
+          <Button
+            disabled={isHealthBusy}
+            onClick={() => void handleCheckQueueFiles()}
+            variant="secondary"
+          >
+            Check Queue Files
+          </Button>
+          <Button
+            disabled={isHealthBusy || jobIsActive || !hasQueueHealthIssue}
+            onClick={() => void handleRepairMissingRaw()}
+            variant="secondary"
+          >
+            Mark Missing Raw as Failed
+          </Button>
           <Button
             disabled={isProcessingBusy || jobIsActive || !processingStatus?.processing}
             onClick={() => void handleRepairStaleProcessing()}
@@ -724,62 +1150,66 @@ export function UpscaleTestPage() {
             Repair Stale Processing
           </Button>
         </div>
-
-        {activeItems.length > 0 ? (
-          <div className="queue-card-list">
-            {activeItems.map((item) => (
-              <QueueItemCard
-                disabled={isQueueBusy || isProcessingBusy}
-                health={queueHealthById.get(item.id)}
-                item={item}
-                key={item.id}
-                onStartProcessing={handleStartProcessingJob}
-                onRemove={handleRemoveQueueItem}
-                processingLocked={jobIsActive}
-              />
-            ))}
+        {healthError ? <div className="notice notice-warning">{healthError}</div> : null}
+        {healthMessage ? (
+          <div
+            className={`notice ${
+              healthMessageVariant === "warning"
+                ? "notice-warning"
+                : "notice-success"
+            }`}
+          >
+            {healthMessage}
           </div>
-        ) : (
-          <div className="empty-state">No ready images in queue.</div>
-        )}
-      </Card>
+        ) : null}
+      </details>
 
-      <Card
-        title="Engine Setup Details"
-        status={<Badge variant="neutral">Secondary</Badge>}
-      >
-        <details className="secondary-details">
-          <summary>Expected layout and safe test</summary>
-          <div className="settings-actions">
-            <Button
-              disabled={isEngineBusy}
-              onClick={() => void handleShowLayout()}
-              variant="secondary"
-            >
-              Show Expected Layout
-            </Button>
-            <Button
-              disabled={isEngineBusy}
-              onClick={() => void handleSafeTest()}
-              variant="secondary"
-            >
-              Run Safe Test
-            </Button>
-            <Button
-              disabled={isEngineBusy}
-              onClick={() => void handleClearOutput()}
-              variant="ghost"
-            >
-              Clear Test Output
-            </Button>
-          </div>
-          {layout ? <ExpectedLayoutDetails layout={layout} /> : null}
-          {discovery ? <EngineDiscoveryDetails discovery={discovery} /> : null}
-          {testResult ? <SafeTestDetails testResult={testResult} /> : null}
-        </details>
-      </Card>
+      <details className="factory-secondary">
+        <summary>Engine Setup Details</summary>
+        <div className="summary-grid">
+          <SummaryItem label="Engine" value={discovery?.ok ? "Ready" : "Missing"} />
+          <SummaryItem
+            label="Binary"
+            value={discovery?.binary?.exists ? "Found" : "Missing"}
+          />
+          <SummaryItem
+            label="Model Files"
+            value={discovery?.models.model_files_count ?? 0}
+          />
+          <SummaryItem
+            label="Help Command"
+            value={discovery?.can_run_basic_command ? "Available" : "Not available"}
+          />
+        </div>
+        <div className="settings-actions">
+          <Button
+            disabled={isEngineBusy}
+            onClick={() => void handleShowLayout()}
+            variant="secondary"
+          >
+            Show Expected Layout
+          </Button>
+          <Button
+            disabled={isEngineBusy}
+            onClick={() => void handleSafeTest()}
+            variant="secondary"
+          >
+            Run Safe Test
+          </Button>
+          <Button
+            disabled={isEngineBusy}
+            onClick={() => void handleClearOutput()}
+            variant="ghost"
+          >
+            Clear Test Output
+          </Button>
+        </div>
+        {layout ? <ExpectedLayoutDetails layout={layout} /> : null}
+        {discovery ? <EngineDiscoveryDetails discovery={discovery} /> : null}
+        {testResult ? <SafeTestDetails testResult={testResult} /> : null}
+      </details>
 
-      <div className="kv-list">
+      <div className="kv-list factory-path-footer">
         <PathRow
           label="Raw asset folder"
           value={intakeSummary?.raw_asset_dir ?? "Not loaded yet"}
@@ -833,26 +1263,21 @@ function ImportResultRow({ item }: { item: ImageImportItemResult }) {
   );
 }
 
-type OutputTargetOption =
-  | "scale_2"
-  | "scale_4"
-  | "scale_8"
-  | "scale_10"
-  | "target_8k"
-  | "custom_long_edge";
-
 function ActiveJobCard({
   imageName,
   job,
   onOpenUpscaledFolder,
-  onRepairInterruptedJob
+  onRepairInterruptedJob,
+  onRequestCancelJob
 }: {
   imageName: string;
   job: UpscaleProcessingJobStatus;
   onOpenUpscaledFolder: () => Promise<void>;
   onRepairInterruptedJob: () => Promise<void>;
+  onRequestCancelJob: () => Promise<void>;
 }) {
   const canRepair = isActiveJobRunning(job);
+  const canStop = job.status === "pending" || job.status === "running";
 
   return (
     <div className="active-job-card">
@@ -866,11 +1291,31 @@ function ActiveJobCard({
         </Badge>
       </div>
       <div className="queue-card-meta">
+        <MetaItem label="Preset" value={job.preset_label ?? "Custom"} />
         <MetaItem label="Target" value={job.target_label} />
         <MetaItem label="Quality" value={qualityModeLabel(job.quality_mode)} />
         <MetaItem label="Tile Size" value={job.tile_size} />
+        <MetaItem label="Resolved Tile" value={String(job.resolved_tile_size || "unknown")} />
+        <MetaItem label="AI Passes" value={String(job.pass_count || 0)} />
+        <MetaItem label="Size Category" value={job.size_category} />
+        <MetaItem
+          label="Source"
+          value={dimensionsLabel(job.source_width, job.source_height)}
+        />
+        <MetaItem
+          label="Target Size"
+          value={dimensionsLabel(job.target_width, job.target_height)}
+        />
+        <MetaItem
+          label="Target MP"
+          value={job.target_megapixels ? job.target_megapixels.toFixed(1) : "0"}
+        />
         <MetaItem label="Stage" value={job.stage || "pending"} />
         <MetaItem label="Elapsed" value={elapsedJobTime(job)} />
+        <MetaItem
+          label="Engine PID"
+          value={job.engine_pid ? String(job.engine_pid) : "Not running"}
+        />
         <MetaItem
           label="Output"
           value={job.output_relative_path ?? "Not created yet"}
@@ -879,8 +1324,7 @@ function ActiveJobCard({
       {canRepair ? (
         <div className="notice notice-warning">
           Large jobs may take time. If Windows was closed or the app was
-          restarted while this job was running, use Mark Interrupted Job as
-          Failed.
+          restarted while this job was running, use Repair Stuck Job.
         </div>
       ) : null}
       {job.error ? <div className="notice notice-warning">{job.error}</div> : null}
@@ -890,6 +1334,15 @@ function ActiveJobCard({
         </div>
       ) : null}
       <div className="queue-card-actions">
+        {canRepair ? (
+          <Button
+            disabled={!canStop}
+            onClick={() => void onRequestCancelJob()}
+            variant="secondary"
+          >
+            {job.status === "cancel_requested" ? "Stopping..." : "Stop Processing"}
+          </Button>
+        ) : null}
         <Button onClick={() => void onOpenUpscaledFolder()} variant="secondary">
           Open Upscaled Folder
         </Button>
@@ -898,7 +1351,7 @@ function ActiveJobCard({
             onClick={() => void onRepairInterruptedJob()}
             variant="ghost"
           >
-            Mark Interrupted Job as Failed
+            Repair Stuck Job
           </Button>
         ) : null}
       </div>
@@ -911,43 +1364,27 @@ function QueueItemCard({
   health,
   item,
   onRemove,
-  onStartProcessing,
-  processingLocked
+  onSelect,
+  processingLocked,
+  selected
 }: {
   disabled: boolean;
   health: UpscaleQueueAssetHealthItem | undefined;
   item: UpscaleQueueItem;
-  onStartProcessing: (
-    queueItemId: string,
-    plan: UpscaleProcessingPlanInput
-  ) => Promise<void>;
   onRemove: (queueItemId: string) => Promise<void>;
+  onSelect: (queueItemId: string) => void;
   processingLocked: boolean;
+  selected: boolean;
 }) {
-  const [targetOption, setTargetOption] =
-    useState<OutputTargetOption>("scale_2");
-  const [customLongEdge, setCustomLongEdge] = useState(7680);
-  const [qualityMode, setQualityMode] =
-    useState<UpscaleProcessingQualityMode>("safe");
-  const [tileSize, setTileSize] =
-    useState<UpscaleProcessingTileSize>("auto");
-  const [jobOutputFormat, setJobOutputFormat] =
-    useState<UpscaleProcessingPlanInput["output_format"]>("png");
-  const canProcess = canProcessQueueItem(item);
   const canRemove = item.status === "queued" || item.status === "failed";
   const workerMessage = queueItemWorkerMessage(item, health);
-  const plan = buildProcessingPlanInput(
-    targetOption,
-    customLongEdge,
-    qualityMode,
-    tileSize,
-    jobOutputFormat
-  );
-  const isLargeTarget = matchesLargeTarget(targetOption);
-  const controlsDisabled = disabled || processingLocked;
 
   return (
-    <article className="queue-item-card">
+    <article
+      className={`queue-item-card factory-review-card ${
+        selected ? "factory-review-card-selected" : ""
+      }`}
+    >
       <header className="queue-card-header">
         <div className="queue-card-title">
           <strong>{item.original_name}</strong>
@@ -962,115 +1399,14 @@ function QueueItemCard({
         <MetaItem label="Size" value={formatSize(item.size_bytes)} />
         <MetaItem label="Source" value={item.source_kind} />
         <MetaItem
-          label="Output"
+          label={item.status === "completed" ? "Saved Output" : "Output"}
           value={item.output_relative_path ?? "Not created"}
         />
+        <MetaItem
+          label="Output Target"
+          value={`${item.desired_scale_factor}x ${item.desired_output_format.toUpperCase()}`}
+        />
       </div>
-
-      <div className="queue-card-controls large-output-controls">
-        <label className="settings-field">
-          <span>Output Target</span>
-          <select
-            disabled={controlsDisabled || !canProcess}
-            value={targetOption}
-            onChange={(event) =>
-              setTargetOption(event.currentTarget.value as OutputTargetOption)
-            }
-          >
-            <option value="scale_2">2x quick test</option>
-            <option value="scale_4">4x standard</option>
-            <option value="scale_8">8x large</option>
-            <option value="scale_10">10x large</option>
-            <option value="target_8k">8K long edge</option>
-            <option value="custom_long_edge">Custom long edge</option>
-          </select>
-        </label>
-        {targetOption === "custom_long_edge" ? (
-          <label className="settings-field">
-            <span>Long Edge</span>
-            <input
-              disabled={controlsDisabled || !canProcess}
-              min={1000}
-              max={10000}
-              onChange={(event) =>
-                setCustomLongEdge(Number(event.currentTarget.value))
-              }
-              type="number"
-              value={customLongEdge}
-            />
-          </label>
-        ) : null}
-        <label className="settings-field">
-          <span>Quality Mode</span>
-          <select
-            disabled={controlsDisabled || !canProcess}
-            value={qualityMode}
-            onChange={(event) =>
-              setQualityMode(
-                event.currentTarget.value as UpscaleProcessingQualityMode
-              )
-            }
-          >
-            <option value="safe">Safe laptop mode</option>
-            <option value="balanced">Balanced</option>
-            <option value="ultra">Ultra quality</option>
-          </select>
-        </label>
-        <label className="settings-field">
-          <span>Tile Size</span>
-          <select
-            disabled={controlsDisabled || !canProcess}
-            value={tileSize}
-            onChange={(event) =>
-              setTileSize(parseTileSize(event.currentTarget.value))
-            }
-          >
-            <option value="auto">Auto</option>
-            <option value={64}>64</option>
-            <option value={128}>128</option>
-            <option value={256}>256</option>
-            <option value={512}>512</option>
-          </select>
-        </label>
-        <label className="settings-field">
-          <span>Output Format</span>
-          <select
-            disabled={controlsDisabled || !canProcess}
-            value={jobOutputFormat}
-            onChange={(event) =>
-              setJobOutputFormat(
-                event.currentTarget.value as UpscaleProcessingPlanInput["output_format"]
-              )
-            }
-          >
-            {jobOutputFormatOptions.map((format) => (
-              <option key={format} value={format}>
-                {format.toUpperCase()}
-              </option>
-            ))}
-          </select>
-        </label>
-      </div>
-      <p className="field-note">
-        Safe laptop mode may take longer but prevents crashes on low-spec
-        systems.
-      </p>
-      {isLargeTarget ? (
-        <div className="notice notice-warning">
-          Large output may take several minutes. The app will keep running the
-          job in the background.
-        </div>
-      ) : null}
-      {isLargeTarget && qualityMode === "ultra" ? (
-        <div className="notice notice-warning">
-          Ultra quality uses extra Real-ESRGAN passes and can be slow.
-        </div>
-      ) : null}
-      {plan.output_format === "webp" && plan.mode !== "scale" ? (
-        <div className="notice notice-warning">
-          Exact 8K/custom final resize works with PNG or JPG in Phase 1.
-        </div>
-      ) : null}
 
       {workerMessage ? (
         <div
@@ -1086,11 +1422,10 @@ function QueueItemCard({
 
       <div className="queue-card-actions">
         <Button
-          disabled={controlsDisabled || !canProcess}
-          onClick={() => void onStartProcessing(item.id, plan)}
-          variant="primary"
+          onClick={() => onSelect(item.id)}
+          variant={selected ? "primary" : "secondary"}
         >
-          Start Processing
+          {selected ? "Selected" : "Select"}
         </Button>
         <Button
           disabled={disabled || !canRemove || processingLocked}
@@ -1302,7 +1637,8 @@ function buildProcessingPlanInput(
   customLongEdge: number,
   qualityMode: UpscaleProcessingQualityMode,
   tileSize: UpscaleProcessingTileSize,
-  outputFormat: UpscaleProcessingPlanInput["output_format"]
+  outputFormat: UpscaleProcessingPlanInput["output_format"],
+  preset: ProcessingPreset
 ): UpscaleProcessingPlanInput {
   if (targetOption === "target_8k") {
     return {
@@ -1311,7 +1647,9 @@ function buildProcessingPlanInput(
       target_long_edge_px: null,
       quality_mode: qualityMode,
       output_format: outputFormat,
-      tile_size: tileSize
+      tile_size: tileSize,
+      preset_id: preset.id,
+      preset_label: preset.name
     };
   }
 
@@ -1322,7 +1660,9 @@ function buildProcessingPlanInput(
       target_long_edge_px: customLongEdge,
       quality_mode: qualityMode,
       output_format: outputFormat,
-      tile_size: tileSize
+      tile_size: tileSize,
+      preset_id: preset.id,
+      preset_label: preset.name
     };
   }
 
@@ -1332,7 +1672,9 @@ function buildProcessingPlanInput(
     target_long_edge_px: null,
     quality_mode: qualityMode,
     output_format: outputFormat,
-    tile_size: tileSize
+    tile_size: tileSize,
+    preset_id: preset.id,
+    preset_label: preset.name
   };
 }
 
@@ -1373,6 +1715,137 @@ function matchesLargeTarget(targetOption: OutputTargetOption) {
     targetOption === "target_8k" ||
     targetOption === "custom_long_edge"
   );
+}
+
+function factoryStatusLabel(
+  discovery: EngineDiscoveryStatus | null,
+  activeJob: UpscaleProcessingJobStatus | null,
+  processingStatus: UpscaleProcessingStatus | null
+) {
+  if (activeJob && isActiveJobRunning(activeJob)) {
+    return "Processing";
+  }
+
+  if (activeJob?.output_relative_path || (processingStatus?.completed ?? 0) > 0) {
+    return "Output Ready";
+  }
+
+  return discovery?.ok ? "Engine Ready" : "Engine Missing";
+}
+
+function factoryBadgeVariant(status: string): "success" | "info" | "warning" {
+  if (status === "Engine Ready" || status === "Output Ready") {
+    return "success";
+  }
+
+  if (status === "Processing") {
+    return "info";
+  }
+
+  return "warning";
+}
+
+function progressTextForJob(job: UpscaleProcessingJobStatus | null) {
+  if (!job) {
+    return "No processing running";
+  }
+
+  if (job.status === "completed") {
+    return "Completed";
+  }
+
+  if (job.status === "failed") {
+    return job.stage === "cancelled" ? "Cancelled" : "Failed";
+  }
+
+  if (job.stage === "real_esrgan") {
+    return job.progress_label || "Real-ESRGAN pass 1 of 1";
+  }
+
+  if (job.stage === "final_resize") {
+    return "Final resize";
+  }
+
+  if (job.status === "cancel_requested") {
+    return "Stopping processing safely";
+  }
+
+  return "Processing image locally";
+}
+
+function progressPercentForJob(job: UpscaleProcessingJobStatus | null) {
+  if (!job) {
+    return 0;
+  }
+
+  if (job.status === "completed") {
+    return 100;
+  }
+
+  if (job.status === "failed") {
+    return job.stage === "cancelled" ? 38 : 100;
+  }
+
+  if (job.status === "cancel_requested") {
+    return 42;
+  }
+
+  if (job.stage === "final_resize") {
+    return 82;
+  }
+
+  if (job.stage === "real_esrgan") {
+    return 58;
+  }
+
+  return 22;
+}
+
+function dimensionsLabel(width: number | undefined, height: number | undefined) {
+  if (!width || !height) {
+    return "Not available";
+  }
+
+  return `${width} x ${height}`;
+}
+
+function estimatedSizeLabel(targetOption: OutputTargetOption) {
+  if (targetOption === "scale_2") {
+    return "small / medium";
+  }
+
+  if (targetOption === "scale_4") {
+    return "medium / heavy";
+  }
+
+  return "heavy / very heavy";
+}
+
+function estimatedPassCountForControls(
+  targetOption: OutputTargetOption,
+  qualityMode: UpscaleProcessingQualityMode
+) {
+  if (
+    qualityMode === "ultra" &&
+    (targetOption === "scale_8" || targetOption === "scale_10")
+  ) {
+    return 2;
+  }
+
+  return 1;
+}
+
+function isLongRunningFourXJob(job: UpscaleProcessingJobStatus) {
+  if (!isActiveJobRunning(job) || !job.started_at || !job.target_label.startsWith("4x")) {
+    return false;
+  }
+
+  const started = Date.parse(job.started_at);
+  if (!Number.isFinite(started)) {
+    return false;
+  }
+
+  return Date.now() - started > 5 * 60 * 1000;
 }
 
 function isActiveJobRunning(job: UpscaleProcessingJobStatus) {

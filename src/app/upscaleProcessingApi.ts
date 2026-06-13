@@ -50,6 +50,16 @@ export async function getActiveUpscaleProcessingJob(): Promise<UpscaleProcessing
   );
 }
 
+export async function requestCancelUpscaleProcessingJob(
+  jobId: string
+): Promise<UpscaleProcessingJobStatus> {
+  return invokeChecked(
+    "request_cancel_upscale_processing_job",
+    isUpscaleProcessingJobStatus,
+    { jobId, confirm: "CANCEL_UPSCALE_PROCESSING_JOB" }
+  );
+}
+
 export async function processNextUpscaleQueueItem(): Promise<UpscaleProcessBatchResult> {
   return invokeChecked(
     "process_next_upscale_queue_item",
@@ -215,7 +225,20 @@ function isUpscaleProcessingJobStatus(
     isString(value.message) &&
     isString(value.target_label) &&
     isString(value.quality_mode) &&
-    isString(value.tile_size)
+    isString(value.tile_size) &&
+    isNullableString(value.preset_id) &&
+    isNullableString(value.preset_label) &&
+    isNumber(value.resolved_tile_size) &&
+    isNumber(value.pass_count) &&
+    isNumber(value.source_width) &&
+    isNumber(value.source_height) &&
+    isNumber(value.target_width) &&
+    isNumber(value.target_height) &&
+    isNumber(value.target_megapixels) &&
+    isString(value.size_category) &&
+    isNullableNumber(value.engine_pid) &&
+    isNullableString(value.cancel_requested_at) &&
+    isNullableString(value.cancelled_at)
   );
 }
 
