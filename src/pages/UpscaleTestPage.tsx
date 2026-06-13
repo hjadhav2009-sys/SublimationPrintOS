@@ -1140,6 +1140,10 @@ function buildImportNotice(
 }
 
 function buildBatchNotice(result: UpscaleProcessBatchResult) {
+  if (!result.ok) {
+    return `${result.message} Batch summary: ${result.attempted} attempted, ${result.completed} completed, ${result.failed} failed.`;
+  }
+
   return `Batch summary: ${result.attempted} attempted, ${result.completed} completed, ${result.failed} failed.`;
 }
 

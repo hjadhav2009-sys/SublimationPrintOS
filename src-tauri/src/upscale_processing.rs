@@ -16,6 +16,8 @@ use std::time::{Duration, Instant};
 const PROCESS_TIMEOUT_SECONDS: u64 = 10 * 60;
 const PREVIEW_LIMIT: usize = 4000;
 const MAX_BATCH_LIMIT: i64 = 100;
+const ENGINE_NOT_READY_MESSAGE: &str =
+    "Real-ESRGAN engine is not installed in the managed engine folder. Use Engine Setup below. Queue items were not changed.";
 static ID_COUNTER: AtomicU64 = AtomicU64::new(1);
 
 #[derive(Debug, Clone, Serialize)]
@@ -71,6 +73,17 @@ struct OutputPlan {
     output_path: PathBuf,
 }
 
+#[derive(Debug, Clone)]
+struct EngineRuntimePaths {
+    engine_dir: PathBuf,
+    binary_path: PathBuf,
+}
+
+struct ProcessingPreflight {
+    raw_path: PathBuf,
+    engine: EngineRuntimePaths,
+}
+
 struct CommandRunResult {
     exit_code: Option<i32>,
     stdout_preview: String,
@@ -103,7 +116,12 @@ pub fn process_next_upscale_queue_item_for_paths(
         });
     };
 
-    let result = process_queue_item(paths, &next_id)?;
+    let engine = match ensure_realesrgan_engine_ready(paths) {
+        Ok(engine) => engine,
+        Err(error) => return Ok(engine_not_ready_batch_result(error)),
+    };
+
+    let result = process_queue_item_with_engine(paths, &next_id, &engine)?;
     let completed = usize::from(result.status == "completed");
     let failed = usize::from(result.status == "failed");
 
@@ -126,6 +144,11 @@ pub fn process_all_queued_upscale_items_for_paths(
         return Err("Batch limit must be between 1 and 100".to_string());
     }
 
+    let engine = match ensure_realesrgan_engine_ready(paths) {
+        Ok(engine) => engine,
+        Err(error) => return Ok(engine_not_ready_batch_result(error)),
+    };
+
     let connection = open_processing_connection(paths)?;
     let queue_item_ids = queued_item_ids(&connection, limit)?;
     drop(connection);
@@ -146,7 +169,7 @@ pub fn process_all_queued_upscale_items_for_paths(
     let mut failed = 0usize;
 
     for queue_item_id in queue_item_ids {
-        let result = process_queue_item(paths, &queue_item_id)?;
+        let result = process_queue_item_with_engine(paths, &queue_item_id, &engine)?;
         if result.status == "completed" {
             completed += 1;
         } else if result.status == "failed" {
@@ -214,6 +237,13 @@ pub fn retry_failed_upscale_queue_item_for_paths(
         None => return Err("Queue item was not found".to_string()),
     }
 
+    let engine = match ensure_realesrgan_engine_ready(paths) {
+        Ok(engine) => engine,
+        Err(error) => {
+            return Ok(non_processing_result(&queue_item_id, "failed", &error));
+        }
+    };
+
     connection
         .execute(
             "
@@ -233,7 +263,7 @@ pub fn retry_failed_upscale_queue_item_for_paths(
         .map_err(|error| format!("Unable to reset failed queue item for retry: {error}"))?;
     drop(connection);
 
-    process_queue_item(paths, &queue_item_id)
+    process_queue_item_with_engine(paths, &queue_item_id, &engine)
 }
 
 pub fn get_upscale_processing_status_for_paths(
@@ -286,6 +316,30 @@ fn process_queue_item(
 ) -> Result<UpscaleProcessItemResult, String> {
     let connection = open_processing_connection(paths)?;
     let item = load_processing_queue_item(&connection, queue_item_id)?;
+    if item.status != "queued" && item.status != "failed" {
+        return Ok(non_processing_result(
+            &item.id,
+            &item.status,
+            "Queue item is not queued or failed",
+        ));
+    }
+    drop(connection);
+
+    let engine = match ensure_realesrgan_engine_ready(paths) {
+        Ok(engine) => engine,
+        Err(error) => return Ok(non_processing_result(&item.id, &item.status, &error)),
+    };
+
+    process_queue_item_with_engine(paths, queue_item_id, &engine)
+}
+
+fn process_queue_item_with_engine(
+    paths: &AppPaths,
+    queue_item_id: &str,
+    engine: &EngineRuntimePaths,
+) -> Result<UpscaleProcessItemResult, String> {
+    let connection = open_processing_connection(paths)?;
+    let item = load_processing_queue_item(&connection, queue_item_id)?;
 
     if item.status != "queued" && item.status != "failed" {
         return Ok(non_processing_result(
@@ -294,6 +348,11 @@ fn process_queue_item(
             "Queue item is not queued or failed",
         ));
     }
+
+    let preflight = match preflight_processing_item(paths, &item, engine) {
+        Ok(preflight) => preflight,
+        Err(error) => return Ok(non_processing_result(&item.id, &item.status, &error)),
+    };
 
     let started = Instant::now();
     let processing_started_at = Utc::now().to_rfc3339();
@@ -336,6 +395,7 @@ fn process_queue_item(
         paths,
         &connection,
         &item,
+        &preflight,
         &command_preview,
         started,
     );
@@ -363,63 +423,10 @@ fn process_queue_item_after_marked_processing(
     paths: &AppPaths,
     connection: &Connection,
     item: &ProcessingQueueItem,
+    preflight: &ProcessingPreflight,
     command_preview: &str,
     started: Instant,
 ) -> Result<UpscaleProcessItemResult, String> {
-    validate_output_format(&item.desired_output_format)?;
-    validate_scale_factor(item.desired_scale_factor)?;
-    if item.raw_asset_type != "raw_image" {
-        return Err("Queue item does not reference a raw image asset".to_string());
-    }
-
-    let raw_root = ensure_assets_subdir(paths, "raw", "Raw assets folder")?;
-    let raw_path = resolve_managed_relative_path(
-        paths,
-        &raw_root,
-        &item.raw_relative_path,
-        "assets/raw",
-        "Raw image asset path",
-    )?;
-    ensure_regular_file_metadata(&raw_path, "Raw image asset")?;
-
-    let engine = engine_paths(paths);
-    let models_root = paths.app_data_dir.join("models");
-    ensure_child_path_inside_parent_for_creation(
-        &paths.app_data_dir,
-        &models_root,
-        "Models folder",
-    )?;
-    ensure_directory_exists_without_symlink(&models_root, "Models folder")?;
-    ensure_child_path_inside_parent_for_creation(
-        &models_root,
-        &engine.engine_dir,
-        "Real-ESRGAN engine directory",
-    )?;
-    ensure_directory_exists_without_symlink(&engine.engine_dir, "Real-ESRGAN engine directory")?;
-    ensure_real_directory_metadata(&engine.engine_dir, "Real-ESRGAN engine directory")?;
-    ensure_regular_file_metadata(&engine.binary_path, "Real-ESRGAN engine binary").map_err(
-        |_| {
-            "Real-ESRGAN engine is not installed in the managed engine folder. Use Engine Setup below."
-                .to_string()
-        },
-    )?;
-    ensure_real_directory_metadata(&engine.models_dir, "Real-ESRGAN models folder").map_err(
-        |_| {
-            "Real-ESRGAN engine is not installed in the managed engine folder. Use Engine Setup below."
-                .to_string()
-        },
-    )?;
-    ensure_existing_path_inside(
-        &engine.engine_dir,
-        &engine.binary_path,
-        "Real-ESRGAN engine binary",
-    )?;
-    ensure_existing_path_inside(
-        &engine.engine_dir,
-        &engine.models_dir,
-        "Real-ESRGAN models folder",
-    )?;
-
     let output_plan = build_output_plan(paths, item)?;
     if output_plan.output_path.exists() {
         remove_file_if_safe(
@@ -448,9 +455,9 @@ fn process_queue_item_after_marked_processing(
     )?;
 
     let run_result = run_processing_command(
-        &engine.binary_path,
-        &engine.engine_dir,
-        &raw_path,
+        &preflight.engine.binary_path,
+        &preflight.engine.engine_dir,
+        &preflight.raw_path,
         &output_plan.output_path,
         item.desired_scale_factor,
         &stdout_path,
@@ -633,6 +640,79 @@ fn fail_processing_item(
         stdout_preview: stdout_preview.to_string(),
         stderr_preview: stderr_preview.to_string(),
     })
+}
+
+fn preflight_processing_item(
+    paths: &AppPaths,
+    item: &ProcessingQueueItem,
+    engine: &EngineRuntimePaths,
+) -> Result<ProcessingPreflight, String> {
+    validate_output_format(&item.desired_output_format)?;
+    validate_scale_factor(item.desired_scale_factor)?;
+    if item.raw_asset_type != "raw_image" {
+        return Err("Queue item does not reference a raw image asset".to_string());
+    }
+
+    let raw_root = ensure_assets_subdir(paths, "raw", "Raw assets folder")?;
+    let raw_path = resolve_managed_relative_path(
+        paths,
+        &raw_root,
+        &item.raw_relative_path,
+        "assets/raw",
+        "Raw image asset path",
+    )?;
+    ensure_regular_file_metadata(&raw_path, "Raw image asset")?;
+
+    Ok(ProcessingPreflight {
+        raw_path,
+        engine: engine.clone(),
+    })
+}
+
+fn ensure_realesrgan_engine_ready(paths: &AppPaths) -> Result<EngineRuntimePaths, String> {
+    let result = || -> Result<EngineRuntimePaths, String> {
+        let engine = engine_paths(paths);
+        let models_root = paths.app_data_dir.join("models");
+
+        ensure_real_directory_metadata(&models_root, "Models folder")?;
+        ensure_existing_path_inside(&paths.app_data_dir, &models_root, "Models folder")?;
+        ensure_real_directory_metadata(&engine.engine_dir, "Real-ESRGAN engine directory")?;
+        ensure_existing_path_inside(
+            &models_root,
+            &engine.engine_dir,
+            "Real-ESRGAN engine directory",
+        )?;
+        ensure_regular_file_metadata(&engine.binary_path, "Real-ESRGAN engine binary")?;
+        ensure_real_directory_metadata(&engine.models_dir, "Real-ESRGAN models folder")?;
+        ensure_existing_path_inside(
+            &engine.engine_dir,
+            &engine.binary_path,
+            "Real-ESRGAN engine binary",
+        )?;
+        ensure_existing_path_inside(
+            &engine.engine_dir,
+            &engine.models_dir,
+            "Real-ESRGAN models folder",
+        )?;
+
+        Ok(EngineRuntimePaths {
+            engine_dir: engine.engine_dir,
+            binary_path: engine.binary_path,
+        })
+    }();
+
+    result.map_err(|_| ENGINE_NOT_READY_MESSAGE.to_string())
+}
+
+fn engine_not_ready_batch_result(message: String) -> UpscaleProcessBatchResult {
+    UpscaleProcessBatchResult {
+        ok: false,
+        attempted: 0,
+        completed: 0,
+        failed: 0,
+        results: Vec::new(),
+        message,
+    }
 }
 
 fn load_processing_queue_item(
@@ -939,7 +1019,14 @@ fn run_processing_command(
     stderr_path: &Path,
 ) -> Result<CommandRunResult, String> {
     let stdout_file = create_new_temp_file(stdout_path, "engine stdout temp file")?;
-    let stderr_file = create_new_temp_file(stderr_path, "engine stderr temp file")?;
+    let stderr_file = match create_new_temp_file(stderr_path, "engine stderr temp file") {
+        Ok(file) => file,
+        Err(error) => {
+            drop(stdout_file);
+            cleanup_temp_files(stdout_path, stderr_path);
+            return Err(error);
+        }
+    };
 
     let mut command = Command::new(executable);
     command
@@ -960,25 +1047,40 @@ fn run_processing_command(
         command.creation_flags(0x08000000);
     }
 
-    let mut child = command
-        .spawn()
-        .map_err(|error| format!("Unable to start Real-ESRGAN processing: {error}"))?;
+    let mut child = match command.spawn() {
+        Ok(child) => child,
+        Err(error) => {
+            drop(command);
+            cleanup_temp_files(stdout_path, stderr_path);
+            return Err(format!("Unable to start Real-ESRGAN processing: {error}"));
+        }
+    };
     let started_at = Instant::now();
     let mut timed_out = false;
     let exit_code = loop {
-        if let Some(status) = child
-            .try_wait()
-            .map_err(|error| format!("Unable to monitor Real-ESRGAN processing: {error}"))?
-        {
-            break status.code();
+        match child.try_wait() {
+            Ok(Some(status)) => break status.code(),
+            Ok(None) => {}
+            Err(error) => {
+                let _ = child.kill();
+                let _ = child.wait();
+                cleanup_temp_files(stdout_path, stderr_path);
+                return Err(format!("Unable to monitor Real-ESRGAN processing: {error}"));
+            }
         }
 
         if started_at.elapsed() >= Duration::from_secs(PROCESS_TIMEOUT_SECONDS) {
             timed_out = true;
             let _ = child.kill();
-            let status = child
-                .wait()
-                .map_err(|error| format!("Unable to stop timed out Real-ESRGAN processing: {error}"))?;
+            let status = match child.wait() {
+                Ok(status) => status,
+                Err(error) => {
+                    cleanup_temp_files(stdout_path, stderr_path);
+                    return Err(format!(
+                        "Unable to stop timed out Real-ESRGAN processing: {error}"
+                    ));
+                }
+            };
             break status.code();
         }
 
@@ -1003,6 +1105,13 @@ fn run_processing_command(
         stderr_preview,
         timed_out,
     })
+}
+
+fn cleanup_temp_files(stdout_path: &Path, stderr_path: &Path) {
+    if let Some(parent) = stdout_path.parent() {
+        let _ = remove_file_if_safe(parent, stdout_path, "Engine stdout temp file");
+        let _ = remove_file_if_safe(parent, stderr_path, "Engine stderr temp file");
+    }
 }
 
 fn create_new_temp_file(path: &Path, label: &str) -> Result<File, String> {
