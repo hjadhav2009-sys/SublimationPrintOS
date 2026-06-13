@@ -3,6 +3,7 @@ mod commands;
 mod database;
 mod diagnostics;
 mod engine;
+mod file_utils;
 mod health;
 mod logging;
 mod migrations;
@@ -12,6 +13,7 @@ mod shell_actions;
 mod storage;
 mod updates;
 mod upscale_intake;
+mod upscale_processing;
 
 use tauri::menu::{Menu, MenuItem, PredefinedMenuItem, Submenu};
 use tauri::{Emitter, Manager, WindowEvent};
@@ -161,7 +163,13 @@ fn main() {
             commands::update_upscale_queue_item_settings,
             commands::remove_upscale_queue_item,
             commands::clear_upscale_queue,
-            commands::get_upscale_intake_summary
+            commands::get_upscale_intake_summary,
+            commands::process_upscale_queue_item,
+            commands::process_next_upscale_queue_item,
+            commands::process_all_queued_upscale_items,
+            commands::retry_failed_upscale_queue_item,
+            commands::get_upscale_processing_status,
+            commands::repair_stale_processing_items
         ])
         .run(tauri::generate_context!())
         .expect("error while running SublimationPrintOS");

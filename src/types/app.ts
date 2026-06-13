@@ -437,6 +437,13 @@ export interface ImageImportResult {
   message: string;
 }
 
+export type UpscaleQueueStatus =
+  | "queued"
+  | "processing"
+  | "completed"
+  | "failed"
+  | "removed";
+
 export interface UpscaleQueueItem {
   id: string;
   file_asset_id: string;
@@ -446,19 +453,30 @@ export interface UpscaleQueueItem {
   mime_type: string | null;
   size_bytes: number | null;
   sha256: string | null;
-  status: "queued" | "removed" | "error";
+  status: UpscaleQueueStatus;
   desired_scale_factor: 2 | 4 | 8;
   desired_output_format: "png" | "jpg" | "tiff" | "webp";
   source_kind: string;
   notes: string | null;
+  output_file_asset_id: string | null;
+  output_relative_path: string | null;
+  processing_started_at: string | null;
+  processing_completed_at: string | null;
+  processing_error: string | null;
+  processing_duration_ms: number | null;
+  engine_command_preview: string | null;
+  engine_stdout_preview: string | null;
+  engine_stderr_preview: string | null;
   created_at: string;
   updated_at: string;
 }
 
 export interface UpscaleQueueSummary {
   queued: number;
+  processing: number;
+  completed: number;
+  failed: number;
   removed: number;
-  error: number;
   total: number;
 }
 
@@ -473,6 +491,38 @@ export interface UpscaleIntakeSummary {
   ok: boolean;
   raw_asset_dir: string;
   queue: UpscaleQueueSummary;
+  message: string;
+}
+
+export interface UpscaleProcessItemResult {
+  ok: boolean;
+  queue_item_id: string;
+  status: UpscaleQueueStatus;
+  output_file_asset_id: string | null;
+  output_relative_path: string | null;
+  duration_ms: number | null;
+  message: string;
+  error: string | null;
+  stdout_preview: string;
+  stderr_preview: string;
+}
+
+export interface UpscaleProcessBatchResult {
+  ok: boolean;
+  attempted: number;
+  completed: number;
+  failed: number;
+  results: UpscaleProcessItemResult[];
+  message: string;
+}
+
+export interface UpscaleProcessingStatus {
+  ok: boolean;
+  queued: number;
+  processing: number;
+  completed: number;
+  failed: number;
+  removed: number;
   message: string;
 }
 

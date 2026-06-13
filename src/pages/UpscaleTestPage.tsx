@@ -8,6 +8,14 @@ import {
 import { commandErrorMessage } from "../app/foundationApi";
 import { openManagedFolder } from "../app/shellApi";
 import {
+  getUpscaleProcessingStatus,
+  processAllQueuedUpscaleItems,
+  processNextUpscaleQueueItem,
+  processUpscaleQueueItem,
+  repairStaleProcessingItems,
+  retryFailedUpscaleQueueItem
+} from "../app/upscaleProcessingApi";
+import {
   clearUpscaleQueue,
   getUpscaleIntakeSummary,
   getUpscaleQueue,
@@ -25,6 +33,9 @@ import type {
   EngineTestRunResult,
   ImageImportItemResult,
   ImageImportResult,
+  UpscaleProcessBatchResult,
+  UpscaleProcessItemResult,
+  UpscaleProcessingStatus,
   UpscaleIntakeSummary,
   UpscaleQueueItem,
   UpscaleQueueResponse
@@ -52,6 +63,23 @@ export function UpscaleTestPage() {
     "success" | "warning"
   >("success");
   const [queueError, setQueueError] = useState<string | null>(null);
+  const [selectedQueueItemId, setSelectedQueueItemId] = useState<string | null>(
+    null
+  );
+  const [processingStatus, setProcessingStatus] =
+    useState<UpscaleProcessingStatus | null>(null);
+  const [lastProcessResult, setLastProcessResult] =
+    useState<UpscaleProcessItemResult | null>(null);
+  const [lastBatchResult, setLastBatchResult] =
+    useState<UpscaleProcessBatchResult | null>(null);
+  const [isProcessingBusy, setIsProcessingBusy] = useState(false);
+  const [processingMessage, setProcessingMessage] = useState<string | null>(
+    null
+  );
+  const [processingMessageVariant, setProcessingMessageVariant] = useState<
+    "success" | "warning"
+  >("success");
+  const [processingError, setProcessingError] = useState<string | null>(null);
 
   const [discovery, setDiscovery] = useState<EngineDiscoveryStatus | null>(null);
   const [layout, setLayout] = useState<EngineExpectedLayout | null>(null);
@@ -65,6 +93,19 @@ export function UpscaleTestPage() {
   useEffect(() => {
     void refreshQueue();
   }, []);
+
+  useEffect(() => {
+    if (!selectedQueueItemId || !queueResponse) {
+      return;
+    }
+
+    const selectedStillProcessable = queueResponse.items.some(
+      (item) => item.id === selectedQueueItemId && canProcessQueueItem(item)
+    );
+    if (!selectedStillProcessable) {
+      setSelectedQueueItemId(null);
+    }
+  }, [queueResponse, selectedQueueItemId]);
 
   useEffect(() => {
     const handleDiscoverEvent = () => {
@@ -84,8 +125,10 @@ export function UpscaleTestPage() {
         getUpscaleQueue(false),
         getUpscaleIntakeSummary()
       ]);
+      const status = await getUpscaleProcessingStatus();
       setQueueResponse(queue);
       setIntakeSummary(summary);
+      setProcessingStatus(status);
       setQueueMessageVariant("success");
       setQueueMessage(messageOverride ?? queue.message);
       return queue;
@@ -207,6 +250,105 @@ export function UpscaleTestPage() {
     }
   };
 
+  const handleProcessSelected = async () => {
+    const selectedItem = queueResponse?.items.find(
+      (item) => item.id === selectedQueueItemId
+    );
+    if (!selectedItem || !canProcessQueueItem(selectedItem)) {
+      setProcessingMessageVariant("warning");
+      setProcessingMessage("Select one queued or failed item before processing.");
+      return;
+    }
+
+    await runItemProcessing(() => processUpscaleQueueItem(selectedItem.id));
+  };
+
+  const handleProcessNext = async () => {
+    await runBatchProcessing(() => processNextUpscaleQueueItem());
+  };
+
+  const handleProcessAll = async () => {
+    const confirmed = window.confirm(
+      "Process up to 20 queued images now? This may take time."
+    );
+    if (!confirmed) {
+      return;
+    }
+
+    await runBatchProcessing(() => processAllQueuedUpscaleItems(20));
+  };
+
+  const handleRepairStaleProcessing = async () => {
+    const confirmed = window.confirm(
+      "Mark interrupted processing items as failed?"
+    );
+    if (!confirmed) {
+      return;
+    }
+
+    setIsProcessingBusy(true);
+    setProcessingMessage(null);
+    setProcessingError(null);
+
+    try {
+      const status = await repairStaleProcessingItems();
+      setProcessingStatus(status);
+      setProcessingMessageVariant("success");
+      setProcessingMessage(status.message);
+      await refreshQueue();
+    } catch (error: unknown) {
+      setProcessingError(commandErrorMessage(error));
+    } finally {
+      setIsProcessingBusy(false);
+    }
+  };
+
+  const handleRetryFailedItem = async (queueItemId: string) => {
+    await runItemProcessing(() => retryFailedUpscaleQueueItem(queueItemId));
+  };
+
+  const runItemProcessing = async (
+    action: () => Promise<UpscaleProcessItemResult>
+  ) => {
+    setIsProcessingBusy(true);
+    setProcessingMessage(null);
+    setProcessingError(null);
+    setLastBatchResult(null);
+
+    try {
+      const result = await action();
+      setLastProcessResult(result);
+      setProcessingMessageVariant(result.ok ? "success" : "warning");
+      setProcessingMessage(result.message);
+      await refreshQueue();
+    } catch (error: unknown) {
+      setProcessingError(commandErrorMessage(error));
+    } finally {
+      setIsProcessingBusy(false);
+    }
+  };
+
+  const runBatchProcessing = async (
+    action: () => Promise<UpscaleProcessBatchResult>
+  ) => {
+    setIsProcessingBusy(true);
+    setProcessingMessage(null);
+    setProcessingError(null);
+    setLastProcessResult(null);
+
+    try {
+      const result = await action();
+      setLastBatchResult(result);
+      setProcessingMessageVariant(result.ok ? "success" : "warning");
+      setProcessingMessage(buildBatchNotice(result));
+      await refreshQueue();
+    } catch (error: unknown) {
+      setProcessingError(commandErrorMessage(error));
+    } finally {
+      setIsProcessingBusy(false);
+    }
+  };
+
   const handleDiscover = async () => {
     setIsEngineBusy(true);
     setEngineErrorMessage(null);
@@ -300,11 +442,11 @@ export function UpscaleTestPage() {
           <p className="eyebrow">Workspace</p>
           <h2>Upscale Factory</h2>
           <p>
-            Import local images into a safe queue. AI processing comes in the
-            next step.
+            Import local images into a safe queue and run local Real-ESRGAN
+            processing when the managed engine is installed.
           </p>
         </div>
-        <Badge variant="success">Intake ready</Badge>
+        <Badge variant="success">Processing foundation</Badge>
       </div>
 
       {queueError ? (
@@ -328,7 +470,7 @@ export function UpscaleTestPage() {
       >
         <p>
           Native dialogs copy supported local images into AppData and register
-          queue rows. No source files are changed and no AI processing runs.
+          queue rows. No source files are changed.
         </p>
         <div className="settings-actions">
           <Button
@@ -381,8 +523,16 @@ export function UpscaleTestPage() {
         </p>
         <div className="summary-grid">
           <SummaryItem label="Queued" value={queueResponse?.summary.queued ?? 0} />
+          <SummaryItem
+            label="Processing"
+            value={queueResponse?.summary.processing ?? 0}
+          />
+          <SummaryItem
+            label="Completed"
+            value={queueResponse?.summary.completed ?? 0}
+          />
+          <SummaryItem label="Failed" value={queueResponse?.summary.failed ?? 0} />
           <SummaryItem label="Removed" value={queueResponse?.summary.removed ?? 0} />
-          <SummaryItem label="Errors" value={queueResponse?.summary.error ?? 0} />
           <SummaryItem label="Total" value={queueResponse?.summary.total ?? 0} />
         </div>
         <div className="kv-list">
@@ -396,8 +546,96 @@ export function UpscaleTestPage() {
       </Card>
 
       <Card
+        title="Processing Controls"
+        status={
+          <Badge variant={processingStatus?.processing ? "warning" : "info"}>
+            {processingStatus?.processing
+              ? `${processingStatus.processing} processing`
+              : "Local only"}
+          </Badge>
+        }
+      >
+        <p>
+          Run local Real-ESRGAN processing for queued images. No cloud
+          processing is used.
+        </p>
+        <div className="summary-grid">
+          <SummaryItem label="Queued" value={processingStatus?.queued ?? 0} />
+          <SummaryItem
+            label="Processing"
+            value={processingStatus?.processing ?? 0}
+          />
+          <SummaryItem
+            label="Completed"
+            value={processingStatus?.completed ?? 0}
+          />
+          <SummaryItem label="Failed" value={processingStatus?.failed ?? 0} />
+          <SummaryItem label="Removed" value={processingStatus?.removed ?? 0} />
+        </div>
+        <div className="settings-actions">
+          <Button
+            disabled={isProcessingBusy || !processingStatus?.queued}
+            onClick={() => void handleProcessNext()}
+            variant="primary"
+          >
+            Process Next
+          </Button>
+          <Button
+            disabled={
+              isProcessingBusy ||
+              !selectedQueueItemId ||
+              !queueResponse?.items.some(
+                (item) => item.id === selectedQueueItemId && canProcessQueueItem(item)
+              )
+            }
+            onClick={() => void handleProcessSelected()}
+            variant="secondary"
+          >
+            Process Selected
+          </Button>
+          <Button
+            disabled={isProcessingBusy || !processingStatus?.queued}
+            onClick={() => void handleProcessAll()}
+            variant="secondary"
+          >
+            Process All Queued
+          </Button>
+          <Button
+            disabled={isProcessingBusy || !processingStatus?.processing}
+            onClick={() => void handleRepairStaleProcessing()}
+            variant="ghost"
+          >
+            Repair Stale Processing
+          </Button>
+        </div>
+        {selectedQueueItemId ? (
+          <div className="notice notice-success">
+            Selected queue item: {selectedQueueItemId}
+          </div>
+        ) : null}
+        {processingError ? (
+          <div className="notice notice-warning">{processingError}</div>
+        ) : null}
+        {processingMessage ? (
+          <div
+            className={`notice ${
+              processingMessageVariant === "warning"
+                ? "notice-warning"
+                : "notice-success"
+            }`}
+          >
+            {processingMessage}
+          </div>
+        ) : null}
+        {lastBatchResult ? <BatchResultSummary result={lastBatchResult} /> : null}
+        {lastProcessResult ? (
+          <ProcessResultSummary result={lastProcessResult} />
+        ) : null}
+      </Card>
+
+      <Card
         title="Current Upscale Queue"
-        status={<Badge variant="warning">Processing not implemented</Badge>}
+        status={<Badge variant="info">Processing foundation</Badge>}
       >
         <p>
           These are the current active queue rows. Last Import Result above only
@@ -410,22 +648,27 @@ export function UpscaleTestPage() {
             </p>
             <div className="queue-table">
               <div className="queue-row queue-row-header">
+                <span>Select</span>
                 <span>Image</span>
                 <span>Status</span>
                 <span>Size</span>
                 <span>Scale</span>
                 <span>Format</span>
-                <span>Source</span>
+                <span>Output</span>
+                <span>Message</span>
                 <span>Created</span>
-                <span>Action</span>
+                <span>Actions</span>
               </div>
               {queueResponse.items.map((item) => (
                 <QueueRow
-                  disabled={isQueueBusy}
+                  disabled={isQueueBusy || isProcessingBusy}
                   item={item}
                   key={item.id}
                   onRemove={handleRemoveQueueItem}
+                  onRetry={handleRetryFailedItem}
+                  onSelect={setSelectedQueueItemId}
                   onUpdate={handleQueueItemSettingsChange}
+                  selected={selectedQueueItemId === item.id}
                 />
               ))}
             </div>
@@ -443,8 +686,8 @@ export function UpscaleTestPage() {
           <p className="eyebrow">Engine Setup</p>
           <h2>Real-ESRGAN Foundation</h2>
           <p>
-            Engine discovery is ready. Batch AI processing will come in a later
-            prompt.
+            Engine discovery and safe test actions use only the managed AppData
+            engine folder.
           </p>
         </div>
         <Badge variant={discovery?.ok ? "success" : "warning"}>
@@ -669,31 +912,101 @@ function ImportResultRow({ item }: { item: ImageImportItemResult }) {
   );
 }
 
+function BatchResultSummary({ result }: { result: UpscaleProcessBatchResult }) {
+  return (
+    <div className="processing-result">
+      <div className="summary-grid">
+        <SummaryItem label="Attempted" value={result.attempted} />
+        <SummaryItem label="Completed" value={result.completed} />
+        <SummaryItem label="Failed" value={result.failed} />
+      </div>
+      {result.results.length > 0 ? (
+        <div className="compact-list">
+          {result.results.map((item) => (
+            <div className="compact-list-row" key={item.queue_item_id}>
+              <span>{item.queue_item_id}</span>
+              <Badge variant={item.ok ? "success" : "warning"}>
+                {item.status}
+              </Badge>
+            </div>
+          ))}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function ProcessResultSummary({ result }: { result: UpscaleProcessItemResult }) {
+  return (
+    <div className="processing-result">
+      <div className="kv-list">
+        <div className="kv-row">
+          <span>Status</span>
+          <span>{result.status}</span>
+        </div>
+        <PathRow
+          label="Output"
+          value={result.output_relative_path ?? "Not created"}
+        />
+        <div className="kv-row">
+          <span>Duration</span>
+          <span>{formatDuration(result.duration_ms)}</span>
+        </div>
+      </div>
+      {result.error ? (
+        <div className="notice notice-warning">{result.error}</div>
+      ) : null}
+      {result.stdout_preview ? (
+        <pre className="preview-box">{result.stdout_preview}</pre>
+      ) : null}
+      {result.stderr_preview ? (
+        <pre className="preview-box">{result.stderr_preview}</pre>
+      ) : null}
+    </div>
+  );
+}
+
 function QueueRow({
   disabled,
   item,
   onRemove,
+  onRetry,
+  onSelect,
+  selected,
   onUpdate
 }: {
   disabled: boolean;
   item: UpscaleQueueItem;
   onRemove: (queueItemId: string) => Promise<void>;
+  onRetry: (queueItemId: string) => Promise<void>;
+  onSelect: (queueItemId: string) => void;
+  selected: boolean;
   onUpdate: (
     item: UpscaleQueueItem,
     desiredScaleFactor: UpscaleQueueItem["desired_scale_factor"],
     desiredOutputFormat: UpscaleQueueItem["desired_output_format"]
   ) => Promise<void>;
 }) {
+  const canProcess = canProcessQueueItem(item);
+
   return (
     <div className="queue-row">
       <span>
-        <strong>{item.original_name}</strong>
-        <small className="path-value">{item.relative_path}</small>
+        <Button
+          disabled={disabled || !canProcess}
+          onClick={() => onSelect(item.id)}
+          variant={selected ? "secondary" : "ghost"}
+        >
+          {selected ? "Selected" : "Select"}
+        </Button>
       </span>
       <span>
-        <Badge variant={item.status === "queued" ? "success" : "warning"}>
-          {item.status}
-        </Badge>
+        <strong>{item.original_name}</strong>
+        <small className="path-value">{item.relative_path}</small>
+        <small>{item.source_kind}</small>
+      </span>
+      <span>
+        <Badge variant={badgeVariantForQueueStatus(item.status)}>{item.status}</Badge>
       </span>
       <span>{formatSize(item.size_bytes)}</span>
       <span>
@@ -734,9 +1047,27 @@ function QueueRow({
           ))}
         </select>
       </span>
-      <span>{item.source_kind}</span>
-      <span className="path-value">{item.created_at}</span>
       <span>
+        <span className="path-value">
+          {item.output_relative_path ?? "Not created"}
+        </span>
+      </span>
+      <span>
+        <span className="path-value">
+          {item.processing_error ?? item.processing_completed_at ?? "None"}
+        </span>
+      </span>
+      <span className="path-value">{item.created_at}</span>
+      <span className="queue-row-actions">
+        {item.status === "failed" ? (
+          <Button
+            disabled={disabled}
+            onClick={() => void onRetry(item.id)}
+            variant="secondary"
+          >
+            Retry
+          </Button>
+        ) : null}
         <Button
           disabled={disabled || item.status !== "queued"}
           onClick={() => void onRemove(item.id)}
@@ -785,11 +1116,31 @@ function badgeVariantForImportStatus(status: ImageImportItemResult["status"]) {
   return "info";
 }
 
+function badgeVariantForQueueStatus(status: UpscaleQueueItem["status"]) {
+  if (status === "queued" || status === "completed") {
+    return "success";
+  }
+
+  if (status === "processing" || status === "failed") {
+    return "warning";
+  }
+
+  return "neutral";
+}
+
+function canProcessQueueItem(item: UpscaleQueueItem) {
+  return item.status === "queued" || item.status === "failed";
+}
+
 function buildImportNotice(
   result: ImageImportResult,
   queue: UpscaleQueueResponse
 ) {
   return `Last import selected ${result.summary.selected} file(s). ${result.summary.queued} queued. Current queue has ${queue.items.length} active item(s).`;
+}
+
+function buildBatchNotice(result: UpscaleProcessBatchResult) {
+  return `Batch summary: ${result.attempted} attempted, ${result.completed} completed, ${result.failed} failed.`;
 }
 
 function importNoticeVariant(result: ImageImportResult) {
@@ -804,4 +1155,16 @@ function formatSize(sizeBytes: number | null) {
   }
 
   return `${(sizeBytes / (1024 * 1024)).toFixed(2)} MB`;
+}
+
+function formatDuration(durationMs: number | null) {
+  if (durationMs === null) {
+    return "Not available";
+  }
+
+  if (durationMs < 1000) {
+    return `${durationMs} ms`;
+  }
+
+  return `${(durationMs / 1000).toFixed(1)} s`;
 }

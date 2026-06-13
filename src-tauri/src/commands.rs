@@ -46,6 +46,12 @@ use crate::upscale_intake::{
     update_upscale_queue_item_settings_for_paths, ImageImportResult, UpscaleIntakeSummary,
     UpscaleQueueItem, UpscaleQueueResponse,
 };
+use crate::upscale_processing::{
+    get_upscale_processing_status_for_paths, process_all_queued_upscale_items_for_paths,
+    process_next_upscale_queue_item_for_paths, process_upscale_queue_item_for_paths,
+    repair_stale_processing_items_for_paths, retry_failed_upscale_queue_item_for_paths,
+    UpscaleProcessBatchResult, UpscaleProcessItemResult, UpscaleProcessingStatus,
+};
 use serde::Serialize;
 use serde_json::Value;
 use tauri::AppHandle;
@@ -411,6 +417,56 @@ pub fn clear_upscale_queue(
 pub fn get_upscale_intake_summary(app: AppHandle) -> Result<UpscaleIntakeSummary, String> {
     let (paths, _storage_summary, _schema_version) = ensure_foundation_ready(&app)?;
     get_upscale_intake_summary_for_paths(&paths)
+}
+
+#[tauri::command]
+pub fn process_upscale_queue_item(
+    app: AppHandle,
+    queue_item_id: String,
+) -> Result<UpscaleProcessItemResult, String> {
+    let (paths, _storage_summary, _schema_version) = ensure_foundation_ready(&app)?;
+    process_upscale_queue_item_for_paths(&paths, queue_item_id)
+}
+
+#[tauri::command]
+pub fn process_next_upscale_queue_item(
+    app: AppHandle,
+) -> Result<UpscaleProcessBatchResult, String> {
+    let (paths, _storage_summary, _schema_version) = ensure_foundation_ready(&app)?;
+    process_next_upscale_queue_item_for_paths(&paths)
+}
+
+#[tauri::command]
+pub fn process_all_queued_upscale_items(
+    app: AppHandle,
+    limit: Option<i64>,
+) -> Result<UpscaleProcessBatchResult, String> {
+    let (paths, _storage_summary, _schema_version) = ensure_foundation_ready(&app)?;
+    process_all_queued_upscale_items_for_paths(&paths, limit)
+}
+
+#[tauri::command]
+pub fn retry_failed_upscale_queue_item(
+    app: AppHandle,
+    queue_item_id: String,
+) -> Result<UpscaleProcessItemResult, String> {
+    let (paths, _storage_summary, _schema_version) = ensure_foundation_ready(&app)?;
+    retry_failed_upscale_queue_item_for_paths(&paths, queue_item_id)
+}
+
+#[tauri::command]
+pub fn get_upscale_processing_status(app: AppHandle) -> Result<UpscaleProcessingStatus, String> {
+    let (paths, _storage_summary, _schema_version) = ensure_foundation_ready(&app)?;
+    get_upscale_processing_status_for_paths(&paths)
+}
+
+#[tauri::command]
+pub fn repair_stale_processing_items(
+    app: AppHandle,
+    confirm: String,
+) -> Result<UpscaleProcessingStatus, String> {
+    let (paths, _storage_summary, _schema_version) = ensure_foundation_ready(&app)?;
+    repair_stale_processing_items_for_paths(&paths, confirm)
 }
 
 fn ensure_foundation_ready(

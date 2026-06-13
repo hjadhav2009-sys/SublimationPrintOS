@@ -20,7 +20,7 @@ Advanced health checks, app-window shortcuts, native menu actions, best-effort c
 
 Upscale Factory and Design Store.
 
-Upscale Factory image intake and queue foundation started. Local images can be copied into AppData, registered in SQLite, and queued for future AI processing. Real AI upscaling, batch processing, previews, quality checks, and Design Store save/approval remain later Phase 1 work.
+Upscale Factory image intake and queue foundation started. Real-ESRGAN processing queue foundation started. Local images can be copied into AppData, registered in SQLite, queued, and processed sequentially when the managed local engine is installed. Before/after previews, quality checks, batch optimization, production export, and Design Store save/approval remain later Phase 1 work.
 
 ## Phase 2
 

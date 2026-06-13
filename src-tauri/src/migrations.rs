@@ -1,7 +1,7 @@
 use chrono::Utc;
 use rusqlite::{params, Connection};
 
-pub const CURRENT_SCHEMA_VERSION: i64 = 2;
+pub const CURRENT_SCHEMA_VERSION: i64 = 3;
 
 pub fn run_migrations(connection: &mut Connection) -> Result<i64, String> {
     ensure_migration_table(connection)?;
@@ -11,6 +11,9 @@ pub fn run_migrations(connection: &mut Connection) -> Result<i64, String> {
     }
     if !migration_applied(connection, 2)? {
         apply_upscale_queue_migration(connection)?;
+    }
+    if !migration_applied(connection, 3)? {
+        apply_upscale_processing_migration(connection)?;
     }
 
     Ok(CURRENT_SCHEMA_VERSION)
@@ -192,4 +195,95 @@ fn apply_upscale_queue_migration(connection: &mut Connection) -> Result<(), Stri
     transaction
         .commit()
         .map_err(|error| format!("Unable to commit upscale queue migration: {error}"))
+}
+
+fn apply_upscale_processing_migration(connection: &mut Connection) -> Result<(), String> {
+    let transaction = connection
+        .transaction()
+        .map_err(|error| format!("Unable to start migration transaction: {error}"))?;
+
+    let columns = [
+        ("output_file_asset_id", "TEXT"),
+        ("output_relative_path", "TEXT"),
+        ("processing_started_at", "TEXT"),
+        ("processing_completed_at", "TEXT"),
+        ("processing_error", "TEXT"),
+        ("processing_duration_ms", "INTEGER"),
+        ("engine_command_preview", "TEXT"),
+        ("engine_stdout_preview", "TEXT"),
+        ("engine_stderr_preview", "TEXT"),
+    ];
+
+    for (column_name, column_type) in columns {
+        if !table_column_exists(&transaction, "upscale_queue_items", column_name)? {
+            let sql = format!("ALTER TABLE upscale_queue_items ADD COLUMN {column_name} {column_type}");
+            transaction
+                .execute(&sql, [])
+                .map_err(|error| format!("Unable to add upscale queue column {column_name}: {error}"))?;
+        }
+    }
+
+    transaction
+        .execute_batch(
+            "
+            CREATE INDEX IF NOT EXISTS idx_upscale_queue_output_file_asset_id
+                ON upscale_queue_items(output_file_asset_id);
+            ",
+        )
+        .map_err(|error| format!("Unable to create upscale processing indexes: {error}"))?;
+
+    let applied_at = Utc::now().to_rfc3339();
+    transaction
+        .execute(
+            "INSERT INTO schema_migrations (version, name, applied_at) VALUES (?1, ?2, ?3)",
+            params![3, "upscale processing foundation", applied_at],
+        )
+        .map_err(|error| format!("Unable to record upscale processing migration: {error}"))?;
+
+    let metadata_json = serde_json::json!({
+        "version": 3,
+        "name": "upscale processing foundation"
+    })
+    .to_string();
+
+    transaction
+        .execute(
+            "
+            INSERT INTO audit_logs (event_type, message, metadata_json, created_at)
+            VALUES (?1, ?2, ?3, ?4)
+            ",
+            params![
+                "migration_applied",
+                "Applied migration 3: upscale processing foundation",
+                metadata_json,
+                Utc::now().to_rfc3339()
+            ],
+        )
+        .map_err(|error| format!("Unable to record migration audit log: {error}"))?;
+
+    transaction
+        .commit()
+        .map_err(|error| format!("Unable to commit upscale processing migration: {error}"))
+}
+
+fn table_column_exists(
+    connection: &Connection,
+    table_name: &str,
+    column_name: &str,
+) -> Result<bool, String> {
+    let mut statement = connection
+        .prepare(&format!("PRAGMA table_info({table_name})"))
+        .map_err(|error| format!("Unable to inspect table {table_name}: {error}"))?;
+    let rows = statement
+        .query_map([], |row| row.get::<_, String>(1))
+        .map_err(|error| format!("Unable to read table {table_name} columns: {error}"))?;
+
+    for row in rows {
+        let existing = row.map_err(|error| format!("Unable to parse table column: {error}"))?;
+        if existing == column_name {
+            return Ok(true);
+        }
+    }
+
+    Ok(false)
 }
